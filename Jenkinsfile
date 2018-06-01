@@ -84,6 +84,12 @@ try {
         sh 'cd /opt/centreon-build && git pull && cd -'
         sh '/opt/centreon-build/jobs/broker/3.4/mon-broker-package.sh debian9-armhf'
       }
+    },
+    'opensuse-leap': {
+      node {
+        sh 'cd /opt/centreon-build && git pull && cd -'
+        sh '/opt/centreon-build/jobs/broker/3.4/mon-broker-package.sh opensuse-leap'
+      }
     }
     if ((currentBuild.result ?: 'SUCCESS') != 'SUCCESS') {
       error('Package stage failure.');
