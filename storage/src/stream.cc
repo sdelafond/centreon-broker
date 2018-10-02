@@ -595,9 +595,9 @@ unsigned int stream::_find_index_id(
       oss << "INSERT INTO " << (db_v2 ? "index_data" : "rt_index_data")
           << "  (host_id, host_name, service_id, service_description,"
              "   must_be_rebuild, special)"
-             "  VALUES (" << host_id << ", " << host_name.toStdString() << ", " << service_id
-          << ", " << service_desc.toStdString() << ", " << (db_v2 ? "'0'" : "0")
-          << ", " << special << ")";
+             "  VALUES (" << host_id << ", '" << host_name.toStdString() << "', " << service_id
+          << ", '" << service_desc.toStdString() << "', " << (db_v2 ? "'0'" : "0")
+          << ", '" << special << "')";
       try {
         int thread_id(_mysql.run_query_sync(oss.str()));
         // Let's get the index id
@@ -853,15 +853,15 @@ void stream::_insert_perfdatas() {
             << "INSERT INTO " << (db_v2 ? "data_bin" : "log_data_bin")
             << "  (" << (db_v2 ? "id_metric" : "metric_id")
             << "   , ctime, status, value)"
-               "  VALUES (" << mv.metric_id << ", " << mv.c_time << ", "
-            << mv.status << ", '";
+               "  VALUES (" << mv.metric_id << ", " << mv.c_time << ", '"
+            << mv.status << "', ";
       if (isinf(mv.value))
         query << ((mv.value < 0.0) ? -FLT_MAX : FLT_MAX);
       else if (isnan(mv.value))
         query << "NULL";
       else
         query << mv.value;
-      query << "')";
+      query << ")";
       _perfdata_queue.pop_front();
     }
 
