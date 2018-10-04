@@ -868,8 +868,8 @@ void stream::_insert_perfdatas() {
     // Insert perfdata in data_bin.
     while (!_perfdata_queue.empty()) {
       metric_value& mv(_perfdata_queue.front());
-      query << ", (" << mv.metric_id << ", " << mv.c_time << ", "
-            << mv.status << ", ";
+      query << ", (" << mv.metric_id << ", " << mv.c_time << ", '"
+            << mv.status << "', ";
       if (isinf(mv.value))
         query << ((mv.value < 0.0) ? -FLT_MAX : FLT_MAX);
       else if (isnan(mv.value))
