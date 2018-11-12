@@ -1,0 +1,32 @@
+Source: centreon-broker
+Section: net
+Priority: optional
+Maintainer: Freexian Packaging Team <team+freexian@tracker.debian.org>
+Uploaders: Sebastien Delafond <seb@debian.org>
+Build-Depends: debhelper (>= 11), cmake, libcentreon-clib, libqt4-dev, libqt4-opengl-dev, zlib1g-dev, pkg-config, librrd-dev, liblua5.3-dev, libgnutls28-dev
+Standards-Version: 4.2.1
+Homepage: https://github.com/centreon/centreon-broker
+Vcs-Browser: https://salsa.debian.org/debian/centreon-broker
+Vcs-Git: https://salsa.debian.org/debian/centreon-broker.git
+
+Package: centreon-broker
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, centreon-engine, rrdtool, adduser
+Description: Network, system, applicative supervision and monitoring - broker
+ Centreon is a modular and flexible platform for network, system and
+ applicative supervision and monitoring.
+ .
+  * monitoring of network services
+  * monitoring of host resources
+  * simple plugin design that allows users to easily develop their own
+    service checks
+  * parallelized service checks
+  * ability to define network hierarchies
+  * contact notifications when service or host problems occur and get
+    resolved (via email, page, or user-defined method)
+  * ability to define event handlers to be run during service or host
+    events for proactive problem resolution
+  * automatic log file rotation
+  * support for implementing redundant monitoring hosts
+ .
+ This package contains the broker daemon.
