@@ -2456,6 +2456,10 @@ void stream::_update_hosts_and_services_of_instance(
        << "  WHERE h.instance_id=" << id;
     q.run_query(ss.str(), "SQL: could not outdate instance");
   }
+  misc::shared_ptr<neb::responsive_instance> ri(new neb::responsive_instance);
+  ri->poller_id = id;
+  ri->responsive = responsive;
+  multiplexing::publisher().write(ri);
 }
 
 /**************************************
