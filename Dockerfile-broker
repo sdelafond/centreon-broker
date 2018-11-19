@@ -24,8 +24,7 @@ RUN mkdir -p /var/lib/centreon-broker
 RUN mkdir -p /var/lib/centreon/metrics
 RUN mkdir -p /var/lib/centreon/status
 
-COPY ./simu/docker/lua/test.lua /usr/share/centreon-broker/lua/
-COPY ./simu/docker/lua/output.lua /usr/share/centreon-broker/lua/
+COPY -r ./simu/docker/lua/* /usr/share/centreon-broker/lua/
 
 #RUN /usr/sbin/cbd /etc/centreon-broker/central-broker.xml
 
