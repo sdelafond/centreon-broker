@@ -5,6 +5,6 @@ set -e
 adduser --system --home /var/lib/centreon-broker --no-create-home --group centreon-broker
 adduser centreon-broker centreon-engine
 chown -R centreon-broker:centreon-engine /var/lib/centreon-broker /var/log/centreon-broker
-chmod 755 /var/lib/centreon-broker /var/log/centreon-broker
+chmod 775 /var/lib/centreon-broker /var/log/centreon-broker
 
 #DEBHELPER#
