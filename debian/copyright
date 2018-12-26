@@ -7,7 +7,7 @@ Copyright: 2011-2013 Centreon
 License: Apache-2.0
 
 Files: neb/inc/com/centreon/engine/*, core/inc/com/centreon/broker/version.hh.in
-Copyright: Ethan Galstad, Merethis
+Copyright: Ethan Galstad, Merethis, Andreas Ericsson, Max Schubert, Nagios Core Development Team and Community Contributors
 License: GPL-2
 
 Files: build/CodeCoverage.cmake
