@@ -1,3 +1,9 @@
+centreon-broker (18.10.0-4) unstable; urgency=medium
+
+  * Add missing attributions in d/copyright (Closes: #917299)
+
+ -- Sebastien Delafond <seb@debian.org>  Wed, 26 Dec 2018 13:12:15 +0100
+
 centreon-broker (18.10.0-3) unstable; urgency=medium
 
   * Give centreon-engine permission to write in /var/log/centreon-broker
