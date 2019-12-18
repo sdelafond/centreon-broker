@@ -1,0 +1,51 @@
+From: =?utf-8?q?S=C3=A9bastien_Delafond?= <sdelafond@gmail.com>
+Date: Wed, 18 Dec 2019 11:18:57 +0100
+Subject: Use packaged json11
+
+---
+ CMakeLists.txt | 18 ++++--------------
+ 1 file changed, 4 insertions(+), 14 deletions(-)
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index e5b1b8c..4189b6f 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -46,19 +46,6 @@ configure_file(
+   "@ONLY"
+ )
+ 
+-include(ExternalProject)
+-
+-ExternalProject_Add( json11_lib
+-                     GIT_REPOSITORY https://github.com/dropbox/json11/
+-                     TIMEOUT 10
+-                     INSTALL_COMMAND ""
+-                     LOG_DOWNLOAD ON
+-                     LOG_CONFIGURE ON
+-                     LOG_BUILD ON)
+-
+-ExternalProject_Get_Property(json11_lib source_dir)
+-ExternalProject_Get_Property(json11_lib binary_dir)
+-
+ link_directories(${binary_dir})
+ include_directories(${source_dir})
+ 
+@@ -66,6 +53,9 @@ include_directories(${source_dir})
+ # Check and/or find required components.
+ #
+ 
++# Find json11
++find_package(json11 REQUIRED)
++
+ # Find Qt.
+ find_package(Qt4 4.7.4 COMPONENTS QtCore QtNetwork QtSql QtXml REQUIRED)
+ 
+@@ -562,7 +552,7 @@ set(LIBROKER_SOURCES
+ 
+ # Static libraries.
+ add_library("rokerbase" STATIC ${LIBROKER_SOURCES})
+-add_dependencies(rokerbase json11_lib)
++add_dependencies(rokerbase json11)
+ include(CheckCXXCompilerFlag)
+ check_cxx_compiler_flag("-fPIC" COMPILER_HAS_FPIC)
+ if (COMPILER_HAS_FPIC)
