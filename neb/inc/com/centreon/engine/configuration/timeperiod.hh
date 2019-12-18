@@ -1,5 +1,5 @@
 /*
-** Copyright 2011-2013 Merethis
+** Copyright 2011-2013,2017 Centreon
 **
 ** This file is part of Centreon Engine.
 **
@@ -39,7 +39,7 @@ namespace                  configuration {
 
                            timeperiod(key_type const& key = "");
                            timeperiod(timeperiod const& right);
-                           ~timeperiod() throw ();
+                           ~timeperiod() throw () override;
     timeperiod&            operator=(timeperiod const& right);
     bool                   operator==(
                              timeperiod const& right) const throw ();
@@ -47,25 +47,22 @@ namespace                  configuration {
                              timeperiod const& right) const throw ();
     bool                   operator<(
                              timeperiod const& right) const throw ();
-    void                   check_validity() const;
+    void                   check_validity() const override;
     key_type const&        key() const throw ();
-    void                   merge(object const& obj);
-    bool                   parse(char const* key, char const* value);
-    bool                   parse(std::string const& line);
+    void                   merge(object const& obj) override;
+    bool                   parse(char const* key, char const* value) override;
+    bool                   parse(std::string const& line) override;
 
     std::string const&     alias() const throw ();
     std::vector<std::list<daterange> > const&
                            exceptions() const throw ();
-    list_string const&     exclude() const throw ();
+    set_string const&      exclude() const throw ();
     std::string const&     timeperiod_name() const throw ();
     std::vector<std::list<timerange> > const&
                            timeranges() const throw ();
 
   private:
-    struct                 setters {
-      char const*          name;
-      bool                 (*func)(timeperiod&, char const*);
-    };
+    typedef bool (*setter_func)(timeperiod&, char const*);
 
     bool                   _add_calendar_date(std::string const& line);
     bool                   _add_other_date(std::string const& line);
@@ -92,17 +89,17 @@ namespace                  configuration {
     bool                   _set_timeperiod_name(std::string const& value);
 
     std::string            _alias;
-    static setters const   _setters[];
+    static std::unordered_map<std::string, setter_func> const _setters;
     std::vector<std::list<daterange> >
                            _exceptions;
-    group                  _exclude;
+    group<set_string>      _exclude;
     std::string            _timeperiod_name;
     std::vector<std::list<timerange> >
                            _timeranges;
   };
 
-  typedef shared_ptr<timeperiod>   timeperiod_ptr;
-  typedef std::set<timeperiod_ptr> set_timeperiod;
+  typedef std::shared_ptr<timeperiod> timeperiod_ptr;
+  typedef std::set<timeperiod>        set_timeperiod;
 }
 
 CCE_END()

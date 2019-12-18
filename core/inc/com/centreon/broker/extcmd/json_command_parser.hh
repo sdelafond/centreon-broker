@@ -19,7 +19,6 @@
 #ifndef CCB_EXTCMD_JSON_COMMAND_PARSER_HH
 #  define CCB_EXTCMD_JSON_COMMAND_PARSER_HH
 
-#  include "com/centreon/broker/json/json_parser.hh"
 #  include "com/centreon/broker/extcmd/command_parser.hh"
 #  include "com/centreon/broker/namespace.hh"
 
@@ -38,16 +37,13 @@ namespace         extcmd {
     unsigned int  parse(
       std::string const& buffer,
       command_result& res,
-      misc::shared_ptr<command_request>& request);
+      std::shared_ptr<command_request>& request);
 
     std::string    write(command_result const& res);
 
   private:
                   json_command_parser(json_command_parser const&);
     json_command_parser& operator=(json_command_parser const&);
-
-    json::json_parser
-                  _parser;
   };
 }
 

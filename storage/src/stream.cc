@@ -1,5 +1,5 @@
 /*
-** Copyright 2011-2017 Centreon
+** Copyright 2011-2019 Centreon
 **
 ** Licensed under the Apache License, Version 2.0 (the "License");
 ** you may not use this file except in compliance with the License.
@@ -64,7 +64,9 @@ using namespace com::centreon::broker::storage;
  *  @return NULL QVariant if f is a NaN, f casted as QVariant otherwise.
  */
 static inline QVariant check_double(double f) {
-  return (isnan(f) ? QVariant(QVariant::Double) : QVariant(f));
+  return (
+    std::isnan(f) || std::isinf(f) ? QVariant(QVariant::Double) : QVariant(f)
+  );
 }
 
 /**
@@ -76,9 +78,9 @@ static inline QVariant check_double(double f) {
  *  @return true if a and b are equal.
  */
 static inline bool double_equal(double a, double b) {
-  return ((isnan(a) && isnan(b))
-          || (isinf(a)
-              && isinf(b)
+  return ((std::isnan(a) && std::isnan(b))
+          || (std::isinf(a)
+              && std::isinf(b)
               && (std::signbit(a) == std::signbit(b)))
           || (std::isfinite(a)
               && std::isfinite(b)
@@ -123,7 +125,9 @@ stream::stream(
     _store_in_db(store_in_db),
     _db(db_cfg),
     _data_bin_insert(_db),
-    _update_metrics(_db) {
+    _update_metrics(_db),
+    _index_data_insert(_db),
+    _index_data_update(_db) {
   // Prepare queries.
   _prepare();
 
@@ -166,12 +170,12 @@ int stream::flush() {
  *
  *  @return This method will throw.
  */
-bool stream::read(misc::shared_ptr<io::data>& d, time_t deadline) {
+bool stream::read(std::shared_ptr<io::data>& d, time_t deadline) {
   (void)deadline;
-  d.clear();
+  d.reset();
   throw (broker::exceptions::shutdown()
          << "cannot read from a storage stream");
-  return (true);
+  return true;
 }
 
 /**
@@ -180,10 +184,9 @@ bool stream::read(misc::shared_ptr<io::data>& d, time_t deadline) {
  *  @param[out] tree Output tree.
  */
 void stream::statistics(io::properties& tree) const {
-  QMutexLocker lock(&_statusm);
+  std::lock_guard<std::mutex> lock(_statusm);
   if (!_status.empty())
     tree.add_property("status", io::property("status", _status));
-  return ;
 }
 
 /**
@@ -202,16 +205,16 @@ void stream::update() {
  *
  *  @return Number of events acknowledged.
  */
-int stream::write(misc::shared_ptr<io::data> const& data) {
+int stream::write(std::shared_ptr<io::data> const& data) {
   // Take this event into account.
   ++_pending_events;
   if (!validate(data, "storage"))
-    return (0);
+    return 0;
 
   // Process service status events.
   if (data->type() == neb::service_status::static_type()) {
-    misc::shared_ptr<neb::service_status>
-      ss(data.staticCast<neb::service_status>());
+    std::shared_ptr<neb::service_status>
+      ss(std::static_pointer_cast<neb::service_status>(data));
     logging::debug(logging::high)
       << "storage: processing service status event of service "
       << ss->service_id << " of host " << ss->host_id
@@ -231,7 +234,7 @@ int stream::write(misc::shared_ptr<io::data> const& data) {
       logging::debug(logging::low)
         << "storage: generating status event for (" << ss->host_id
         << ", " << ss->service_id << ") of index " << index_id;
-      misc::shared_ptr<storage::status> status(new storage::status);
+      std::shared_ptr<storage::status> status(new storage::status);
       status->ctime = ss->last_check;
       status->index_id = index_id;
       status->interval
@@ -253,7 +256,7 @@ int stream::write(misc::shared_ptr<io::data> const& data) {
             << "storage: error while parsing perfdata of service ("
             << ss->host_id << ", " << ss->service_id << "): "
             << e.what();
-          return (0);
+          return 0;
         }
 
         // Loop through all metrics.
@@ -295,7 +298,7 @@ int stream::write(misc::shared_ptr<io::data> const& data) {
 
           if (!index_locked && !metric_locked) {
             // Send perfdata event to processing.
-            misc::shared_ptr<storage::metric>
+            std::shared_ptr<storage::metric>
               perf(new storage::metric);
             perf->ctime = ss->last_check;
             perf->interval
@@ -411,7 +414,7 @@ void stream::_check_deleted_index() {
     ++deleted_index;
 
     // Remove associated graph.
-    misc::shared_ptr<remove_graph> rg(new remove_graph);
+    std::shared_ptr<remove_graph> rg(new remove_graph);
     rg->id = index_id;
     rg->is_index = true;
     multiplexing::publisher().write(rg);
@@ -493,13 +496,11 @@ void stream::_delete_metrics(
     }
 
     // Remove associated graph.
-    misc::shared_ptr<remove_graph> rg(new remove_graph);
+    std::shared_ptr<remove_graph> rg(new remove_graph);
     rg->id = metric_id;
     rg->is_index = false;
     multiplexing::publisher().write(rg);
   }
-
-  return ;
 }
 
 /**
@@ -536,10 +537,10 @@ unsigned int stream::_find_index_id(
     it(_index_cache.find(std::make_pair(host_id, service_id)));
 
   // Special.
-  bool special(!strncmp(
+  int32_t special(strncmp(
                   host_name.toStdString().c_str(),
                   BAM_NAME,
-                  sizeof(BAM_NAME) - 1));
+                  sizeof(BAM_NAME) - 1) == 0 ? 1 : 0);
 
   // Found in cache.
   if (it != _index_cache.end()) {
@@ -555,26 +556,28 @@ unsigned int stream::_find_index_id(
         << service_id << ") (host: " << host_name << ", service: "
         << service_desc << ", special: " << special << ")";
       // Update index_data table.
-      std::ostringstream query;
-      query << "UPDATE " << (db_v2 ? "index_data" : "rt_index_data")
-            << "  SET host_name=:host_name,"
-               "     service_description=:service_description,"
-               "     special=:special"
-               "  WHERE host_id=:host_id"
-               "    AND service_id=:service_id";
+      if (!_index_data_update.prepared()) {
+        _index_data_update.prepare(
+          "UPDATE index_data"
+          " SET host_name=:host_name,"
+          " service_description=:service_description,"
+          " special=:special"
+          " WHERE host_id=:host_id"
+          " AND service_id=:service_id"
+        );
+      }
       try {
-        database_query q(_db);
-        q.prepare(query.str());
-        q.bind_value(":host_name", host_name);
-        q.bind_value(":service_description", service_desc);
-        q.bind_value(":special", special);
-        q.bind_value(":host_id", host_id);
-        q.bind_value(":service_id", service_id);
-        q.run_statement();
+        _index_data_update.bind_value(":host_name", host_name);
+        _index_data_update.bind_value(":service_description", service_desc);
+        _index_data_update.bind_value(":special", special == 0 ? "0" : "1");
+        _index_data_update.bind_value(":host_id", host_id);
+        _index_data_update.bind_value(":service_id", service_id);
+
+        _index_data_update.run_statement();
       }
       catch (std::exception const& e) {
         throw (broker::exceptions::msg() << "storage: could not update "
-                  "service information in rt_index_data (host_id "
+                  "service information in index_data (host_id "
                << host_id << ", service_id " << service_id
                << ", host_name " << host_name
                << ", service_description " << service_desc
@@ -607,22 +610,24 @@ unsigned int stream::_find_index_id(
         << "storage: creating new index for (" << host_id << ", "
         << service_id << ")";
       // Build query.
-      std::ostringstream oss;
-      oss << "INSERT INTO " << (db_v2 ? "index_data" : "rt_index_data")
-          << "  (host_id, host_name, service_id, service_description,"
-             "   must_be_rebuild, special)"
-             "  VALUES (" << host_id << ", :host_name, " << service_id
-          << ", :service_description, " << (db_v2 ? "'0'" : "0")
-          << ", :special)";
-      database_query q(_db);
+      if (!_index_data_insert.prepared()) {
+        std::ostringstream oss;
+        oss << "INSERT INTO index_data (host_id, host_name, service_id,"
+               " service_description, must_be_rebuild, special)"
+               " VALUES (:host_id, :host_name, :service_id, :service_description, :must_be_rebuild, :special)";
+      _index_data_insert.prepare(oss.str());
+      }
       try {
-        q.prepare(oss.str());
-        q.bind_value(":host_name", host_name);
-        q.bind_value(":service_description", service_desc);
-        q.bind_value(":special", special);
+        _index_data_insert.bind_value(":host_id", host_id);
+        _index_data_insert.bind_value(":host_name", host_name);
+        _index_data_insert.bind_value(":service_id", service_id);
+        _index_data_insert.bind_value(":service_description", service_desc);
+        _index_data_insert.bind_value(":must_be_rebuild", "0");
+        QString sp(QString::number(special));
+        _index_data_insert.bind_value(":special", sp);
 
         // Execute query.
-        q.run_statement();
+        _index_data_insert.run_statement();
       }
       catch (std::exception const& e) {
         throw (broker::exceptions::msg() << "storage: insertion of "
@@ -632,8 +637,8 @@ unsigned int stream::_find_index_id(
 
       // Fetch insert ID with query if possible.
       if (!_db.get_qt_driver()->hasFeature(QSqlDriver::LastInsertId)
-          || !(retval = q.last_insert_id().toUInt())) {
-        q.finish();
+          || !(retval = _index_data_insert.last_insert_id().toUInt())) {
+        _index_data_insert.finish();
         std::ostringstream oss2;
         oss2 << "SELECT " << (db_v2 ? "id" : "index_id")
              << "  FROM " << (db_v2 ? "index_data" : "rt_index_data")
@@ -671,7 +676,7 @@ unsigned int stream::_find_index_id(
       _index_cache[std::make_pair(host_id, service_id)] = info;
 
       // Create the metric mapping.
-      misc::shared_ptr<index_mapping> im(new index_mapping);
+      std::shared_ptr<index_mapping> im(new index_mapping);
       im->index_id = retval;
       im->host_id = host_id;
       im->service_id = service_id;
@@ -685,7 +690,7 @@ unsigned int stream::_find_index_id(
     }
   }
 
-  return (retval);
+  return retval;
 }
 
 /**
@@ -895,7 +900,7 @@ unsigned int stream::_find_metric_id(
     _metric_cache[std::make_pair(index_id, metric_name)] = info;
 
     // Create the metric mapping.
-    misc::shared_ptr<metric_mapping> mm(new metric_mapping);
+    std::shared_ptr<metric_mapping> mm(new metric_mapping);
     mm->index_id = index_id;
     mm->metric_id = info.metric_id;
     multiplexing::publisher pblshr;
@@ -904,7 +909,7 @@ unsigned int stream::_find_metric_id(
     *locked = info.locked;
   }
 
-  return (retval);
+  return retval;
 }
 
 /**
@@ -927,11 +932,11 @@ void stream::_insert_perfdatas() {
             << "INSERT INTO " << (db_v2 ? "data_bin" : "log_data_bin")
             << "  (" << (db_v2 ? "id_metric" : "metric_id")
             << "   , ctime, status, value)"
-               "  VALUES (" << mv.metric_id << ", " << mv.c_time << ", "
-            << mv.status << ", '";
-      if (isinf(mv.value))
+               "  VALUES (" << mv.metric_id << ", " << mv.c_time << ", '"
+            << mv.status << "', '";
+      if (std::isinf(mv.value))
         query << ((mv.value < 0.0) ? -FLT_MAX : FLT_MAX);
-      else if (isnan(mv.value))
+      else if (std::isnan(mv.value))
         query << "NULL";
       else
         query << mv.value;
@@ -942,11 +947,11 @@ void stream::_insert_perfdatas() {
     // Insert perfdata in data_bin.
     while (!_perfdata_queue.empty()) {
       metric_value& mv(_perfdata_queue.front());
-      query << ", (" << mv.metric_id << ", " << mv.c_time << ", "
-            << mv.status << ", ";
-      if (isinf(mv.value))
+      query << ", (" << mv.metric_id << ", " << mv.c_time << ", '"
+            << mv.status << "', ";
+      if (std::isinf(mv.value))
         query << ((mv.value < 0.0) ? -FLT_MAX : FLT_MAX);
-      else if (isnan(mv.value))
+      else if (std::isnan(mv.value))
         query << "NULL";
       else
         query << mv.value;
@@ -1050,7 +1055,7 @@ void stream::_rebuild_cache() {
       _index_cache[std::make_pair(host_id, service_id)] = info;
 
       // Create the metric mapping.
-      misc::shared_ptr<index_mapping> im(new index_mapping);
+      std::shared_ptr<index_mapping> im(new index_mapping);
       im->index_id = info.index_id;
       im->host_id = host_id;
       im->service_id = service_id;
@@ -1099,7 +1104,7 @@ void stream::_rebuild_cache() {
       _metric_cache[std::make_pair(index_id, name)] = info;
 
       // Create the metric mapping.
-      misc::shared_ptr<metric_mapping> mm(new metric_mapping);
+      std::shared_ptr<metric_mapping> mm(new metric_mapping);
       mm->index_id = index_id;
       mm->metric_id = info.metric_id;
       pblshr.write(mm);
@@ -1118,7 +1123,6 @@ void stream::_rebuild_cache() {
  *  @param[in] status New status.
  */
 void stream::_update_status(std::string const& status) {
-  QMutexLocker lock(&_statusm);
+  std::lock_guard<std::mutex> lock(_statusm);
   _status = status;
-  return ;
 }

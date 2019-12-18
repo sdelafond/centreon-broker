@@ -1,5 +1,5 @@
 /*
-** Copyright 2011-2013 Merethis
+** Copyright 2011-2013,2017 Centreon
 **
 ** This file is part of Centreon Engine.
 **
@@ -38,7 +38,6 @@
 #  include "com/centreon/engine/configuration/state.hh"
 #  include "com/centreon/engine/configuration/timeperiod.hh"
 #  include "com/centreon/engine/namespace.hh"
-#  include "com/centreon/unordered_hash.hh"
 
 CCE_BEGIN()
 
@@ -83,26 +82,26 @@ namespace              configuration {
     void               _apply_serviceextinfo();
     file_info const&   _get_file_info(object* obj) const;
     void               _get_hosts_by_hostgroups(
-                         hostgroup_ptr const& hostgroups,
+                         hostgroup const& hostgroups,
                          list_host& hosts);
     void               _get_hosts_by_hostgroups_name(
-                         list_string const& lst_group,
+                         set_string const& lst_group,
                          list_host& hosts);
     template<typename T>
     void               _get_objects_by_list_name(
-                         list_string const& lst,
+                         set_string const& lst,
                          map_object& objects,
-                         std::list<shared_ptr<T> >& out);
+                         std::list<T>& out);
 
 
     template<typename T>
     static void        _insert(
                          list_object const& from,
-                         std::set<shared_ptr<T> >& to);
+                         std::set<T>& to);
     template<typename T>
     static void        _insert(
                          map_object const& from,
-                         std::set<shared_ptr<T> >& to);
+                         std::set<T>& to);
     std::string const& _map_object_type(
                          map_object const& objects) const throw ();
     void               _parse_directory_configuration(std::string const& path);
@@ -119,7 +118,7 @@ namespace              configuration {
     std::string        _current_path;
     list_object        _lst_objects[15];
     map_object         _map_objects[15];
-    umap<object*, file_info>
+    std::unordered_map<object*, file_info>
                        _objects_info;
     unsigned int       _read_options;
     static store       _store[];

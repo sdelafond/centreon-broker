@@ -1,5 +1,5 @@
 /*
-** Copyright 2011-2013 Merethis
+** Copyright 2011-2013,2017 Centreon
 **
 ** This file is part of Centreon Engine.
 **
@@ -21,7 +21,6 @@
 #  define CCE_CONFIGURATION_APPLIER_HOST_HH
 
 #  include "com/centreon/engine/namespace.hh"
-#  include "com/centreon/shared_ptr.hh"
 
 CCE_BEGIN()
 
@@ -34,20 +33,18 @@ namespace          configuration {
     class          host {
     public:
                    host();
-                   host(host const& right);
+                   host(host const& right) = delete;
                    ~host() throw ();
-      host&        operator=(host const& right);
+      host&        operator=(host const& right) = delete;
       void         add_object(
-                     shared_ptr<configuration::host> obj);
-      void         expand_object(
-                     shared_ptr<configuration::host> obj,
-                     configuration::state& s);
+                     configuration::host const& obj);
+      void         expand_objects(configuration::state& s);
       void         modify_object(
-                     shared_ptr<configuration::host> obj);
+                     configuration::host const& obj);
       void         remove_object(
-                     shared_ptr<configuration::host> obj);
+                     configuration::host const& obj);
       void         resolve_object(
-                     shared_ptr<configuration::host> obj);
+                     configuration::host const& obj);
     };
   }
 }

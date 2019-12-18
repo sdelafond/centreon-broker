@@ -20,7 +20,6 @@
 #include "com/centreon/broker/config/applier/init.hh"
 #include "com/centreon/broker/io/events.hh"
 #include "com/centreon/broker/io/raw.hh"
-#include "com/centreon/broker/misc/shared_ptr.hh"
 #include "com/centreon/broker/multiplexing/engine.hh"
 #include "com/centreon/broker/multiplexing/muxer.hh"
 #include "com/centreon/broker/multiplexing/subscriber.hh"
@@ -51,12 +50,12 @@ int main() {
   int retval(0);
 
   // Check that subscriber is empty.
-  misc::shared_ptr<io::data> event;
+  std::shared_ptr<io::data> event;
   s.get_muxer().read(event, 0);
   retval |= !event.isNull();
 
   // Write data to subscriber.
-  misc::shared_ptr<io::raw> data(new io::raw);
+  std::shared_ptr<io::raw> data(new io::raw);
   data->append(MSG);
   s.get_muxer().write(data.staticCast<io::data>());
 

@@ -1,7 +1,7 @@
 /*
-** Copyright 1999-2009 Ethan Galstad
-** Copyright 2009-2011 Nagios Core Development Team and Community Contributors
-** Copyright 2011-2013 Merethis
+** Copyright 1999-2009      Ethan Galstad
+** Copyright 2009-2011      Nagios Core Development Team and Community Contributors
+** Copyright 2011-2013,2016 Centreon
 **
 ** This file is part of Centreon Engine.
 **
@@ -207,30 +207,15 @@
 #  define CMD_DEL_DOWNTIME_BY_HOST_NAME                      170
 #  define CMD_DEL_DOWNTIME_BY_HOSTGROUP_NAME                 171
 #  define CMD_DEL_DOWNTIME_BY_START_TIME_COMMENT             172
+#  define CMD_DEL_HOST_DOWNTIME_FULL                         501
+#  define CMD_DEL_SVC_DOWNTIME_FULL                          502
 #  define CMD_CUSTOM_COMMAND                                 999
 
-/* Service check types. */
-#  define SERVICE_CHECK_ACTIVE  0 /* Engine performed the service check. */
-#  define SERVICE_CHECK_PASSIVE 1 /* The service check result was submitted by an external source. */
-
-/* Host check types. */
-#  define HOST_CHECK_ACTIVE  0 /* Engine performed the host check. */
-#  define HOST_CHECK_PASSIVE 1 /* The host check result was submitted by an external source. */
-
-/* Service state types. */
-#  define SOFT_STATE 0
-#  define HARD_STATE 1
 
 /* Scheduled downtime types. */
 #  define SERVICE_DOWNTIME 1 /* Service downtime. */
 #  define HOST_DOWNTIME    2 /* Host downtime. */
 #  define ANY_DOWNTIME     3 /* Host or service downtime. */
-
-/* Notification options. */
-#  define NOTIFICATION_OPTION_NONE      0
-#  define NOTIFICATION_OPTION_BROADCAST 1
-#  define NOTIFICATION_OPTION_FORCED    2
-#  define NOTIFICATION_OPTION_INCREMENT 4
 
 /* Acknowledgement types. */
 #  define HOST_ACKNOWLEDGEMENT    0
@@ -239,10 +224,6 @@
 #  define ACKNOWLEDGEMENT_NONE    0
 #  define ACKNOWLEDGEMENT_NORMAL  1
 #  define ACKNOWLEDGEMENT_STICKY  2
-
-/* Dependency types. */
-#  define NOTIFICATION_DEPENDENCY 1
-#  define EXECUTION_DEPENDENCY    2
 
 /* Host/service check options. */
 #  define CHECK_OPTION_NONE            0 /* No check options. */
@@ -331,17 +312,6 @@
 
 /* Default values. */
 #  define DEFAULT_ORPHAN_CHECK_INTERVAL 60 /* Seconds between checks for orphaned hosts and services. */
-
-/* Host status. */
-#  define HOST_UP          0
-#  define HOST_DOWN        1
-#  define HOST_UNREACHABLE 2
-
-/* Service state. */
-#  define STATE_OK       0
-#  define STATE_WARNING  1
-#  define STATE_CRITICAL 2
-#  define STATE_UNKNOWN  3
 
 /* State change types. */
 #  define HOST_STATECHANGE    0

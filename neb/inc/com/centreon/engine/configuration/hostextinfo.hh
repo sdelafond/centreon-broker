@@ -1,5 +1,5 @@
 /*
-** Copyright 2011-2013 Merethis
+** Copyright 2011-2013,2017 Centreon
 **
 ** This file is part of Centreon Engine.
 **
@@ -35,24 +35,24 @@ namespace                  configuration {
   class                    hostextinfo : public object {
     friend class host;
 
-  public:
+   public:
                            hostextinfo();
                            hostextinfo(hostextinfo const& right);
-                           ~hostextinfo() throw ();
+                           ~hostextinfo() throw () override;
     hostextinfo&           operator=(hostextinfo const& right);
     bool                   operator==(
                              hostextinfo const& right) const throw ();
     bool                   operator!=(
                              hostextinfo const& right) const throw ();
-    void                   check_validity() const;
-    void                   merge(object const& obj);
-    bool                   parse(char const* key, char const* value);
+    void                   check_validity() const override;
+    void                   merge(object const& obj) override;
+    bool                   parse(char const* key, char const* value) override;
 
     std::string const&     action_url() const throw ();
     point_2d const&        coords_2d() const throw ();
     point_3d const&        coords_3d() const throw ();
-    list_string const&     hostgroups() const throw ();
-    list_string const&     hosts() const throw ();
+    set_string const&      hostgroups() const throw ();
+    set_string const&      hosts() const throw ();
     std::string const&     icon_image() const throw ();
     std::string const&     icon_image_alt() const throw ();
     std::string const&     notes() const throw ();
@@ -60,11 +60,8 @@ namespace                  configuration {
     std::string const&     statusmap_image() const throw ();
     std::string const&     vrml_image() const throw ();
 
-  private:
-    struct                 setters {
-      char const*          name;
-      bool                 (*func)(hostextinfo&, char const*);
-    };
+   private:
+    typedef bool (*setter_func)(hostextinfo&, char const*);
 
     bool                   _set_action_url(std::string const& value);
     bool                   _set_coords_2d(std::string const& value);
@@ -81,22 +78,21 @@ namespace                  configuration {
     std::string            _action_url;
     opt<point_2d>          _coords_2d;
     opt<point_3d>          _coords_3d;
-    group                  _hostgroups;
-    group                  _hosts;
+    group<set_string>      _hostgroups;
+    group<set_string>      _hosts;
     std::string            _icon_image;
     std::string            _icon_image_alt;
     std::string            _notes;
     std::string            _notes_url;
-    static setters const   _setters[];
+    static std::unordered_map<std::string, setter_func> const _setters;
     std::string            _statusmap_image;
     std::string            _vrml_image;
   };
 
-  typedef shared_ptr<hostextinfo>    hostextinfo_ptr;
-  typedef std::list<hostextinfo_ptr> list_hostextinfo;
+  typedef std::shared_ptr<hostextinfo> hostextinfo_ptr;
+  typedef std::list<hostextinfo_ptr>   list_hostextinfo;
 }
 
 CCE_END()
 
 #endif // !CCE_CONFIGURATION_HOSTEXTINFO_HH
-

@@ -1,5 +1,5 @@
 /*
-** Copyright 2011-2013 Merethis
+** Copyright 2011-2013,2015 Merethis
 **
 ** This file is part of Centreon Engine.
 **
@@ -24,7 +24,6 @@
 #  include "com/centreon/engine/namespace.hh"
 #  include "com/centreon/engine/opt.hh"
 #  include "com/centreon/engine/retention/object.hh"
-#  include "com/centreon/shared_ptr.hh"
 
 CCE_BEGIN()
 
@@ -33,18 +32,17 @@ namespace                     retention {
   public:
                               program();
                               program(program const& right);
-                              ~program() throw ();
+                              ~program() throw () override;
     program&                  operator=(program const& right);
     bool                      operator==(program const& right) const throw ();
     bool                      operator!=(program const& right) const throw ();
-    bool                      set(char const* key, char const* value);
+    bool                      set(char const* key, char const* value) override;
 
     opt<bool> const&          active_host_checks_enabled() const throw ();
     opt<bool> const&          active_service_checks_enabled() const throw ();
     opt<bool> const&          check_host_freshness() const throw ();
     opt<bool> const&          check_service_freshness() const throw ();
     opt<bool> const&          enable_event_handlers() const throw ();
-    opt<bool> const&          enable_failure_prediction() const throw ();
     opt<bool> const&          enable_flap_detection() const throw ();
     opt<bool> const&          enable_notifications() const throw ();
     opt<std::string> const&   global_host_event_handler() const throw ();
@@ -96,7 +94,6 @@ namespace                     retention {
     opt<bool>                 _check_host_freshness;
     opt<bool>                 _check_service_freshness;
     opt<bool>                 _enable_event_handlers;
-    opt<bool>                 _enable_failure_prediction;
     opt<bool>                 _enable_flap_detection;
     opt<bool>                 _enable_notifications;
     opt<std::string>          _global_host_event_handler;
@@ -116,10 +113,9 @@ namespace                     retention {
     static setters const      _setters[];
   };
 
-  typedef shared_ptr<program> program_ptr;
+  typedef std::shared_ptr<program> program_ptr;
 }
 
 CCE_END()
 
 #endif // !CCE_RETENTION_PROGRAM_HH
-
