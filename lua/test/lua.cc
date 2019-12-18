@@ -16,20 +16,19 @@
 ** For more information : contact@centreon.com
 */
 
-#include <QFile>
-#include <QTextStream>
-#include <QStringList>
-#include <memory>
 #include <gtest/gtest.h>
+#include <QFile>
+#include <QStringList>
+#include <QTextStream>
+#include <fstream>
+#include <memory>
 #include "com/centreon/broker/config/applier/init.hh"
 #include "com/centreon/broker/exceptions/msg.hh"
-#include "com/centreon/broker/instance_broadcast.hh"
 #include "com/centreon/broker/lua/luabinding.hh"
 #include "com/centreon/broker/lua/macro_cache.hh"
-#include "com/centreon/broker/misc/shared_ptr.hh"
 #include "com/centreon/broker/modules/loader.hh"
 #include "com/centreon/broker/neb/events.hh"
-#include "com/centreon/broker/persistent_cache.hh"
+#include "com/centreon/broker/neb/instance.hh"
 #include "com/centreon/broker/storage/status.hh"
 
 using namespace com::centreon::broker;
@@ -41,17 +40,16 @@ using namespace com::centreon::broker::lua;
 #define FILE3 CENTREON_BROKER_LUA_SCRIPT_PATH "/test3.lua"
 #define FILE4 CENTREON_BROKER_LUA_SCRIPT_PATH "/socket.lua"
 
-class LuaGenericTest : public ::testing::Test {
+class LuaTest : public ::testing::Test {
  public:
   void SetUp() {
     try {
       config::applier::init();
+    } catch (std::exception const& e) {
+      (void)e;
     }
-    catch (std::exception const& e) {
-      (void) e;
-    }
-    misc::shared_ptr<persistent_cache> pcache
-      = new persistent_cache("/tmp/broker_test_cache");
+    std::shared_ptr<persistent_cache> pcache(
+        std::make_shared<persistent_cache>("/tmp/broker_test_cache"));
     _cache.reset(new macro_cache(pcache));
   }
   void TearDown() {
@@ -60,11 +58,9 @@ class LuaGenericTest : public ::testing::Test {
     config::applier::deinit();
   }
 
-  void CreateScript(std::string const& filename, QString const& content) {
-    QFile file(filename.c_str());
-    file.open(QIODevice::WriteOnly);
-    QTextStream out(&file);
-    out << content;
+  void CreateScript(std::string const& filename, std::string const& content) {
+    std::ofstream oss(filename);
+    oss << content;
   }
 
   QStringList ReadFile(QString const& filename) {
@@ -89,59 +85,57 @@ class LuaGenericTest : public ::testing::Test {
   }
 
  protected:
-  std::auto_ptr<macro_cache> _cache;
+  std::unique_ptr<macro_cache> _cache;
 };
 
 // When a lua script that does not exist is loaded
 // Then an exception is thrown
-TEST_F(LuaGenericTest, MissingScript) {
+TEST_F(LuaTest, MissingScript) {
   QMap<QString, QVariant> conf;
   ASSERT_THROW(new luabinding(FILE1, conf, *_cache.get()), exceptions::msg);
 }
 
 // When a lua script with error such as number divided by nil is loaded
 // Then an exception is thrown
-TEST_F(LuaGenericTest, FaultyScript) {
+TEST_F(LuaTest, FaultyScript) {
   QMap<QString, QVariant> conf;
   std::string filename("/tmp/faulty.lua");
-  CreateScript(filename, "local a = { 1, 2, 3 }\n"
-                         "local b = 18 / a[4]");
-  ASSERT_THROW(
-    new luabinding(filename, conf, *_cache.get()),
-    exceptions::msg);
+  CreateScript(filename,
+               "local a = { 1, 2, 3 }\n"
+               "local b = 18 / a[4]");
+  ASSERT_THROW(new luabinding(filename, conf, *_cache.get()), exceptions::msg);
   RemoveFile(filename);
 }
 
 // When a lua script that does not contain an init() function is loaded
 // Then an exception is thrown
-TEST_F(LuaGenericTest, WithoutInit) {
+TEST_F(LuaTest, WithoutInit) {
   QMap<QString, QVariant> conf;
   std::string filename("/tmp/without_init.lua");
   CreateScript(filename, "local a = { 1, 2, 3 }\n");
-  ASSERT_THROW(
-    new luabinding(filename, conf, *_cache.get()), exceptions::msg);
+  ASSERT_THROW(new luabinding(filename, conf, *_cache.get()), exceptions::msg);
   RemoveFile(filename);
 }
 
 // When a lua script that does not contain a filter() function is loaded
 // Then has_filter() method returns false
-TEST_F(LuaGenericTest, WithoutFilter) {
+TEST_F(LuaTest, WithoutFilter) {
   QMap<QString, QVariant> conf;
   std::string filename("/tmp/without_filter.lua");
-  CreateScript(filename, "function init()\n"
-                         "end\n"
-                         "function write(d)\n"
-                         "  return 1\n"
-                         "end");
-  std::auto_ptr<luabinding> bb(
-    new luabinding(filename, conf, *_cache.get()));
+  CreateScript(filename,
+               "function init()\n"
+               "end\n"
+               "function write(d)\n"
+               "  return 1\n"
+               "end");
+  std::unique_ptr<luabinding> bb(new luabinding(filename, conf, *_cache.get()));
   ASSERT_FALSE(bb->has_filter());
   RemoveFile(filename);
 }
 
 // When a json parameters file exists but the lua script is incomplete
 // Then an exception is thrown
-TEST_F(LuaGenericTest, IncompleteScript) {
+TEST_F(LuaTest, IncompleteScript) {
   QMap<QString, QVariant> conf;
   ASSERT_THROW(new luabinding(FILE2, conf, *_cache.get()), exceptions::msg);
 }
@@ -149,7 +143,7 @@ TEST_F(LuaGenericTest, IncompleteScript) {
 // When a script is correctly loaded and a neb event has to be sent
 // Then this event is translated into a Lua table and sent to the lua write()
 // function.
-TEST_F(LuaGenericTest, SimpleScript) {
+TEST_F(LuaTest, SimpleScript) {
   RemoveFile("/tmp/test.log");
   QMap<QString, QVariant> conf;
   conf["address"] = "127.0.0.1";
@@ -157,18 +151,19 @@ TEST_F(LuaGenericTest, SimpleScript) {
   modules::loader l;
   l.load_file("./neb/10-neb.so");
 
-  std::auto_ptr<luabinding> bnd(new luabinding(FILE3, conf, *_cache.get()));
+  std::unique_ptr<luabinding> bnd(new luabinding(FILE3, conf, *_cache.get()));
   ASSERT_TRUE(bnd.get());
-  std::auto_ptr<neb::service> s(new neb::service);
+  std::unique_ptr<neb::service> s(new neb::service);
   s->host_id = 12;
   s->service_id = 18;
   s->output = "Bonjour";
-  misc::shared_ptr<io::data> svc(s.release());
+  std::shared_ptr<io::data> svc(s.release());
   bnd->write(svc);
 
   QStringList result(ReadFile("/tmp/test.log"));
   ASSERT_EQ(result.size(), 74);
-  ASSERT_TRUE(result.indexOf(QRegExp(".*INFO: init: address => 127\\.0\\.0\\.1")) >= 0);
+  ASSERT_TRUE(
+      result.indexOf(QRegExp(".*INFO: init: address => 127\\.0\\.0\\.1")) >= 0);
   ASSERT_TRUE(result.indexOf(QRegExp(".*INFO: init: port => 8857")) >= 0);
   ASSERT_TRUE(result.indexOf(QRegExp(".*INFO: write: host_id => 12")) >= 0);
   ASSERT_TRUE(result.indexOf(QRegExp(".*INFO: write: output => Bonjour")) >= 0);
@@ -180,7 +175,7 @@ TEST_F(LuaGenericTest, SimpleScript) {
 // When a script is correctly loaded and a neb event has to be sent
 // Then this event is translated into a Lua table and sent to the lua write()
 // function.
-TEST_F(LuaGenericTest, WriteAcknowledgement) {
+TEST_F(LuaTest, WriteAcknowledgement) {
   RemoveFile("/tmp/test.log");
   QMap<QString, QVariant> conf;
   conf["address"] = "127.0.0.1";
@@ -190,21 +185,24 @@ TEST_F(LuaGenericTest, WriteAcknowledgement) {
   modules::loader l;
   l.load_file("./neb/10-neb.so");
 
-  std::auto_ptr<luabinding> bnd(new luabinding(FILE3, conf, *_cache.get()));
+  std::unique_ptr<luabinding> bnd(new luabinding(FILE3, conf, *_cache.get()));
   ASSERT_TRUE(bnd.get());
-  std::auto_ptr<neb::acknowledgement> s(new neb::acknowledgement);
+  std::unique_ptr<neb::acknowledgement> s(new neb::acknowledgement);
   s->host_id = 13;
   s->author = "testAck";
   s->service_id = 21;
-  misc::shared_ptr<io::data> svc(s.release());
+  std::shared_ptr<io::data> svc(s.release());
   bnd->write(svc);
 
   QStringList result(ReadFile("/tmp/test.log"));
   ASSERT_EQ(result.size(), 15);
-  ASSERT_TRUE(result.indexOf(QRegExp(".*INFO: init: address => 127\\.0\\.0\\.1")) >= 0);
-  ASSERT_TRUE(result.indexOf(QRegExp(".*INFO: init: double => 3.1415926535898")) >= 0);
+  ASSERT_TRUE(
+      result.indexOf(QRegExp(".*INFO: init: address => 127\\.0\\.0\\.1")) >= 0);
+  ASSERT_TRUE(
+      result.indexOf(QRegExp(".*INFO: init: double => 3.1415926535898")) >= 0);
   ASSERT_TRUE(result.indexOf(QRegExp(".*INFO: init: port => 8857")) >= 0);
-  ASSERT_TRUE(result.indexOf(QRegExp(".*INFO: init: name => test-centreon")) >= 0);
+  ASSERT_TRUE(result.indexOf(QRegExp(".*INFO: init: name => test-centreon")) >=
+              0);
   ASSERT_TRUE(result.indexOf(QRegExp(".*INFO: write: host_id => 13")) >= 0);
   ASSERT_TRUE(result.indexOf(QRegExp(".*INFO: write: author => testAck")) >= 0);
   ASSERT_TRUE(result.indexOf(QRegExp(".*INFO: write: service_id => 21")) >= 0);
@@ -214,14 +212,15 @@ TEST_F(LuaGenericTest, WriteAcknowledgement) {
 
 // When a script is loaded and a new socket is created
 // Then it is created.
-TEST_F(LuaGenericTest, SocketCreation) {
+TEST_F(LuaTest, SocketCreation) {
   QMap<QString, QVariant> conf;
   std::string filename("/tmp/socket.lua");
-  CreateScript(filename, "function init(conf)\n"
-                         "  local socket = broker_tcp_socket.new()\n"
-                         "end\n\n"
-                         "function write(d)\n"
-                         "end\n\n");
+  CreateScript(filename,
+               "function init(conf)\n"
+               "  local socket = broker_tcp_socket.new()\n"
+               "end\n\n"
+               "function write(d)\n"
+               "end\n\n");
   ASSERT_NO_THROW(new luabinding(filename, conf, *_cache.get()));
   RemoveFile(filename);
 }
@@ -229,15 +228,16 @@ TEST_F(LuaGenericTest, SocketCreation) {
 // When a script is loaded, a new socket is created
 // And a call to connect is made without argument
 // Then it fails.
-TEST_F(LuaGenericTest, SocketConnectionWithoutArg) {
+TEST_F(LuaTest, SocketConnectionWithoutArg) {
   QMap<QString, QVariant> conf;
   std::string filename("/tmp/socket.lua");
-  CreateScript(filename, "function init(conf)\n"
-                         "  local socket = broker_tcp_socket.new()\n"
-                         "  socket:connect()\n"
-                         "end\n\n"
-                         "function write(d)\n"
-                         "end\n\n");
+  CreateScript(filename,
+               "function init(conf)\n"
+               "  local socket = broker_tcp_socket.new()\n"
+               "  socket:connect()\n"
+               "end\n\n"
+               "function write(d)\n"
+               "end\n\n");
   ASSERT_THROW(new luabinding(filename, conf, *_cache.get()), std::exception);
   RemoveFile(filename);
 }
@@ -245,15 +245,16 @@ TEST_F(LuaGenericTest, SocketConnectionWithoutArg) {
 // When a script is loaded, a new socket is created
 // And a call to connect is made without argument
 // Then it fails.
-TEST_F(LuaGenericTest, SocketConnectionWithNoPort) {
+TEST_F(LuaTest, SocketConnectionWithNoPort) {
   QMap<QString, QVariant> conf;
   std::string filename("/tmp/socket.lua");
-  CreateScript(filename, "function init(conf)\n"
-                         "  local socket = broker_tcp_socket.new()\n"
-                         "  socket:connect('127.0.0.1')\n"
-                         "end\n\n"
-                         "function write(d)\n"
-                         "end\n\n");
+  CreateScript(filename,
+               "function init(conf)\n"
+               "  local socket = broker_tcp_socket.new()\n"
+               "  socket:connect('127.0.0.1')\n"
+               "end\n\n"
+               "function write(d)\n"
+               "end\n\n");
   ASSERT_THROW(new luabinding(filename, conf, *_cache.get()), std::exception);
   RemoveFile(filename);
 }
@@ -264,7 +265,7 @@ TEST_F(LuaGenericTest, SocketConnectionWithNoPort) {
 // When a script is loaded, a new socket is created
 // And a call to connect is made with a good adress/port
 // Then it succeeds.
-TEST_F(LuaGenericTest, SocketConnectionOk) {
+TEST_F(LuaTest, SocketConnectionOk) {
   QMap<QString, QVariant> conf;
   std::string filename("/tmp/socket.lua");
   CreateScript(filename, "function init(conf)\n"
@@ -280,7 +281,7 @@ TEST_F(LuaGenericTest, SocketConnectionOk) {
 // When a script is loaded, a new socket is created
 // And a call to get_state is made
 // Then it succeeds, and the return value is Unconnected.
-TEST_F(LuaGenericTest, SocketUnconnectedState) {
+TEST_F(LuaTest, SocketUnconnectedState) {
   QMap<QString, QVariant> conf;
   std::string filename("/tmp/socket.lua");
   CreateScript(filename, "function init(conf)\n"
@@ -304,7 +305,7 @@ TEST_F(LuaGenericTest, SocketUnconnectedState) {
 // When a script is loaded, a new socket is created
 // And a call to get_state is made
 // Then it succeeds, and the return value is Unconnected.
-TEST_F(LuaGenericTest, SocketConnectedState) {
+TEST_F(LuaTest, SocketConnectedState) {
   QMap<QString, QVariant> conf;
   std::string filename("/tmp/socket.lua");
   CreateScript(filename, "function init(conf)\n"
@@ -328,7 +329,7 @@ TEST_F(LuaGenericTest, SocketConnectedState) {
 // When a script is loaded, a new socket is created
 // And a call to connect is made with a good adress/port
 // Then it succeeds.
-TEST_F(LuaGenericTest, SocketWrite) {
+TEST_F(LuaTest, SocketWrite) {
   QMap<QString, QVariant> conf;
   std::string filename(FILE4);
   ASSERT_NO_THROW(new luabinding(filename, conf, *_cache.get()));
@@ -341,26 +342,29 @@ TEST_F(LuaGenericTest, SocketWrite) {
 // When a script is loaded, a new socket is created
 // And a call to connect is made with a good adress/port
 // Then it succeeds.
-TEST_F(LuaGenericTest, JsonEncode) {
+TEST_F(LuaTest, JsonEncode) {
   QMap<QString, QVariant> conf;
   std::string filename("/tmp/json_encode.lua");
-  CreateScript(filename, "function init(conf)\n"
-                         "  broker_log:set_parameters(3, '/tmp/log')\n"
-                         "  broker_log:info('coucou')\n"
-                         "  local a = { aa='bonjour',bb=12,cc={'a', 'b', 'c', 4},dd=true}\n"
-                         "  local json = broker.json_encode(a)\n"
-                         "  local b = broker.json_decode(json)\n"
-                         "  for i,v in pairs(b) do\n"
-                         "    broker_log:info(1, i .. '=>' .. tostring(v))\n"
-                         "  end"
-                         "  broker_log:info(1, json)\n"
-                         "end\n\n"
-                         "function write(d)\n"
-                         "end\n");
-  std::auto_ptr<luabinding> binding(new luabinding(filename, conf, *_cache.get()));
+  CreateScript(
+      filename,
+      "function init(conf)\n"
+      "  broker_log:set_parameters(3, '/tmp/log')\n"
+      "  broker_log:info('coucou')\n"
+      "  local a = { aa='C:\\\\bonjour',bb=12,cc={'a', 'b', 'c', 4},dd=true}\n"
+      "  local json = broker.json_encode(a)\n"
+      "  local b = broker.json_decode(json)\n"
+      "  for i,v in pairs(b) do\n"
+      "    broker_log:info(1, i .. '=>' .. tostring(v))\n"
+      "  end"
+      "  broker_log:info(1, json)\n"
+      "end\n\n"
+      "function write(d)\n"
+      "end\n");
+  std::unique_ptr<luabinding> binding(
+      new luabinding(filename, conf, *_cache.get()));
   QStringList lst(ReadFile("/tmp/log"));
 
-  ASSERT_TRUE(lst.indexOf(QRegExp(".*INFO: aa=>bonjour")) != -1);
+  ASSERT_TRUE(lst.indexOf(QRegExp(".*INFO: aa=>C:\\\\bonjour")) != -1);
   ASSERT_TRUE(lst.indexOf(QRegExp(".*INFO: bb=>12")) != -1);
   ASSERT_TRUE(lst.indexOf(QRegExp(".*INFO: cc=>table: .*")) != -1);
   ASSERT_TRUE(lst.indexOf(QRegExp(".*INFO: dd=>true")) != -1);
@@ -370,18 +374,20 @@ TEST_F(LuaGenericTest, JsonEncode) {
 
 // Given an empty array,
 // Then json_encode() works well on it.
-TEST_F(LuaGenericTest, EmptyJsonEncode) {
+TEST_F(LuaTest, EmptyJsonEncode) {
   QMap<QString, QVariant> conf;
   std::string filename("/tmp/json_encode.lua");
-  CreateScript(filename, "function init(conf)\n"
-                         "  broker_log:set_parameters(3, '/tmp/log')\n"
-                         "  local a = {}\n"
-                         "  local json = broker.json_encode(a)\n"
-                         "  broker_log:info(1, 'empty array: ' .. json)\n"
-                         "end\n\n"
-                         "function write(d)\n"
-                         "end\n");
-  std::auto_ptr<luabinding> binding(new luabinding(filename, conf, *_cache.get()));
+  CreateScript(filename,
+               "function init(conf)\n"
+               "  broker_log:set_parameters(3, '/tmp/log')\n"
+               "  local a = {}\n"
+               "  local json = broker.json_encode(a)\n"
+               "  broker_log:info(1, 'empty array: ' .. json)\n"
+               "end\n\n"
+               "function write(d)\n"
+               "end\n");
+  std::unique_ptr<luabinding> binding(
+      new luabinding(filename, conf, *_cache.get()));
   QStringList lst(ReadFile("/tmp/log"));
 
   ASSERT_TRUE(lst[0].contains("INFO: empty array: []"));
@@ -392,25 +398,29 @@ TEST_F(LuaGenericTest, EmptyJsonEncode) {
 // When a script is loaded, a new socket is created
 // And a call to connect is made with a good adress/port
 // Then it succeeds.
-TEST_F(LuaGenericTest, JsonEncodeEscape) {
+TEST_F(LuaTest, JsonEncodeEscape) {
   QMap<QString, QVariant> conf;
   std::string filename("/tmp/json_encode.lua");
-  CreateScript(filename, "function init(conf)\n"
-                         "  broker_log:set_parameters(3, '/tmp/log')\n"
-                         "  local a = { 'bonjour le \"monde\"', 12, true, 27.1, {a=1, b=2, c=3, d=4}, 'une tabulation\\t...'}\n"
-                         "  local json = broker.json_encode(a)\n"
-                         "  local b = broker.json_decode(json)\n"
-                         "  for i,v in ipairs(b) do\n"
-                         "    broker_log:info(1, i .. '=>' .. tostring(v))\n"
-                         "  end"
-                         "  broker_log:info(1, json)\n"
-                         "end\n\n"
-                         "function write(d)\n"
-                         "end\n");
-  std::auto_ptr<luabinding> binding(new luabinding(filename, conf, *_cache.get()));
+  CreateScript(filename,
+               "function init(conf)\n"
+               "  broker_log:set_parameters(3, '/tmp/log')\n"
+               "  local a = { 'd:\\\\bonjour le \"monde\"', 12, true, 27.1, "
+               "{a=1, b=2, c=3, d=4}, 'une tabulation\\t...'}\n"
+               "  local json = broker.json_encode(a)\n"
+               "  local b = broker.json_decode(json)\n"
+               "  for i,v in ipairs(b) do\n"
+               "    broker_log:info(1, i .. '=>' .. tostring(v))\n"
+               "  end"
+               "  broker_log:info(1, json)\n"
+               "end\n\n"
+               "function write(d)\n"
+               "end\n");
+  std::unique_ptr<luabinding> binding(
+      new luabinding(filename, conf, *_cache.get()));
   QStringList lst(ReadFile("/tmp/log"));
 
-  ASSERT_TRUE(lst.indexOf(QRegExp(".*INFO: 1=>bonjour le \"monde\"")) != -1);
+  ASSERT_TRUE(lst.indexOf(QRegExp(".*INFO: 1=>d:\\\\bonjour le \"monde\"")) !=
+              -1);
   ASSERT_TRUE(lst.indexOf(QRegExp(".*INFO: 2=>12")) != -1);
   ASSERT_TRUE(lst.indexOf(QRegExp(".*INFO: 3=>true")) != -1);
   ASSERT_TRUE(lst.indexOf(QRegExp(".*INFO: 4=>27.1")) != -1);
@@ -423,19 +433,21 @@ TEST_F(LuaGenericTest, JsonEncodeEscape) {
 // When a query for a hostname is made
 // And the cache does not know about it
 // Then nil is returned from the lua method.
-TEST_F(LuaGenericTest, CacheTest) {
+TEST_F(LuaTest, CacheTest) {
   QMap<QString, QVariant> conf;
   std::string filename("/tmp/cache_test.lua");
-  CreateScript(filename, "function init(conf)\n"
-                         "  broker_log:set_parameters(3, '/tmp/log')\n"
-                         "  local hst = broker_cache:get_hostname(1)\n"
-                         "  if not hst then\n"
-                         "    broker_log:info(1, 'host does not exist')\n"
-                         "  end\n"
-                         "end\n\n"
-                         "function write(d)\n"
-                         "end\n");
-  std::auto_ptr<luabinding> binding(new luabinding(filename, conf, *_cache.get()));
+  CreateScript(filename,
+               "function init(conf)\n"
+               "  broker_log:set_parameters(3, '/tmp/log')\n"
+               "  local hst = broker_cache:get_hostname(1)\n"
+               "  if not hst then\n"
+               "    broker_log:info(1, 'host does not exist')\n"
+               "  end\n"
+               "end\n\n"
+               "function write(d)\n"
+               "end\n");
+  std::unique_ptr<luabinding> binding(
+      new luabinding(filename, conf, *_cache.get()));
   QStringList lst(ReadFile("/tmp/log"));
 
   ASSERT_TRUE(lst[0].contains("host does not exist"));
@@ -446,22 +458,24 @@ TEST_F(LuaGenericTest, CacheTest) {
 // When a query for a hostname is made
 // And the cache knows about it
 // Then the hostname is returned from the lua method.
-TEST_F(LuaGenericTest, HostCacheTest) {
+TEST_F(LuaTest, HostCacheTest) {
   QMap<QString, QVariant> conf;
   std::string filename("/tmp/cache_test.lua");
-  shared_ptr<neb::host> hst(new neb::host);
+  std::shared_ptr<neb::host> hst(new neb::host);
   hst->host_id = 1;
   hst->host_name = strdup("centreon");
   _cache->write(hst);
 
-  CreateScript(filename, "function init(conf)\n"
-                         "  broker_log:set_parameters(3, '/tmp/log')\n"
-                         "  local hst = broker_cache:get_hostname(1)\n"
-                         "  broker_log:info(1, 'host is ' .. tostring(hst))\n"
-                         "end\n\n"
-                         "function write(d)\n"
-                         "end\n");
-  std::auto_ptr<luabinding> binding(new luabinding(filename, conf, *_cache.get()));
+  CreateScript(filename,
+               "function init(conf)\n"
+               "  broker_log:set_parameters(3, '/tmp/log')\n"
+               "  local hst = broker_cache:get_hostname(1)\n"
+               "  broker_log:info(1, 'host is ' .. tostring(hst))\n"
+               "end\n\n"
+               "function write(d)\n"
+               "end\n");
+  std::unique_ptr<luabinding> binding(
+      new luabinding(filename, conf, *_cache.get()));
   QStringList lst(ReadFile("/tmp/log"));
 
   ASSERT_TRUE(lst[0].contains("host is centreon"));
@@ -472,23 +486,26 @@ TEST_F(LuaGenericTest, HostCacheTest) {
 // When a query for a hostname is made
 // And the cache knows about it
 // Then the hostname is returned from the lua method.
-TEST_F(LuaGenericTest, ServiceCacheTest) {
+TEST_F(LuaTest, ServiceCacheTest) {
   QMap<QString, QVariant> conf;
   std::string filename("/tmp/cache_test.lua");
-  shared_ptr<neb::service> svc(new neb::service);
+  std::shared_ptr<neb::service> svc(new neb::service);
   svc->host_id = 1;
   svc->service_id = 14;
   svc->service_description = strdup("description");
   _cache->write(svc);
 
-  CreateScript(filename, "function init(conf)\n"
-                         "  broker_log:set_parameters(3, '/tmp/log')\n"
-                         "  local svc = broker_cache:get_service_description(1, 14)\n"
-                         "  broker_log:info(1, 'service description is ' .. tostring(svc))\n"
-                         "end\n\n"
-                         "function write(d)\n"
-                         "end\n");
-  std::auto_ptr<luabinding> binding(new luabinding(filename, conf, *_cache.get()));
+  CreateScript(
+      filename,
+      "function init(conf)\n"
+      "  broker_log:set_parameters(3, '/tmp/log')\n"
+      "  local svc = broker_cache:get_service_description(1, 14)\n"
+      "  broker_log:info(1, 'service description is ' .. tostring(svc))\n"
+      "end\n\n"
+      "function write(d)\n"
+      "end\n");
+  std::unique_ptr<luabinding> binding(
+      new luabinding(filename, conf, *_cache.get()));
   QStringList lst(ReadFile("/tmp/log"));
 
   ASSERT_TRUE(lst[0].contains("service description is description"));
@@ -499,33 +516,38 @@ TEST_F(LuaGenericTest, ServiceCacheTest) {
 // When a query for a hostname is made
 // And the cache knows about it
 // Then the hostname is returned from the lua method.
-TEST_F(LuaGenericTest, IndexMetricCacheTest) {
+TEST_F(LuaTest, IndexMetricCacheTest) {
   QMap<QString, QVariant> conf;
   std::string filename("/tmp/cache_test.lua");
-  shared_ptr<neb::service> svc(new neb::service);
+  std::shared_ptr<neb::service> svc(new neb::service);
   svc->host_id = 1;
   svc->service_id = 14;
   svc->service_description = strdup("MyDescription");
   _cache->write(svc);
-  shared_ptr<neb::host> hst(new neb::host);
+  std::shared_ptr<neb::host> hst(new neb::host);
   hst->host_id = 1;
   hst->host_name = strdup("host1");
   _cache->write(hst);
-  shared_ptr<storage::index_mapping> im(new storage::index_mapping);
+  std::shared_ptr<storage::index_mapping> im(new storage::index_mapping);
   im->index_id = 7;
   im->service_id = 14;
   im->host_id = 1;
   _cache->write(im);
 
-  CreateScript(filename, "function init(conf)\n"
-                         "  broker_log:set_parameters(3, '/tmp/log')\n"
-                         "  local index_mapping = broker_cache:get_index_mapping(7)\n"
-                         "  local svc = broker_cache:get_service_description(index_mapping.host_id, index_mapping.service_id)\n"
-                         "  broker_log:info(1, 'service description is ' .. tostring(svc))\n"
-                         "end\n\n"
-                         "function write(d)\n"
-                         "end\n");
-  std::auto_ptr<luabinding> binding(new luabinding(filename, conf, *_cache.get()));
+  CreateScript(
+      filename,
+      "function init(conf)\n"
+      "  broker_log:set_parameters(3, '/tmp/log')\n"
+      "  local index_mapping = broker_cache:get_index_mapping(7)\n"
+      "  local svc = "
+      "broker_cache:get_service_description(index_mapping.host_id, "
+      "index_mapping.service_id)\n"
+      "  broker_log:info(1, 'service description is ' .. tostring(svc))\n"
+      "end\n\n"
+      "function write(d)\n"
+      "end\n");
+  std::unique_ptr<luabinding> binding(
+      new luabinding(filename, conf, *_cache.get()));
   QStringList lst(ReadFile("/tmp/log"));
 
   ASSERT_TRUE(lst[0].contains("service description is MyDescription"));
@@ -536,25 +558,28 @@ TEST_F(LuaGenericTest, IndexMetricCacheTest) {
 // When a query for an instance is made
 // And the cache knows about it
 // Then the instance is returned from the lua method.
-TEST_F(LuaGenericTest, InstanceNameCacheTest) {
+TEST_F(LuaTest, InstanceNameCacheTest) {
   QMap<QString, QVariant> conf;
   std::string filename("/tmp/cache_test.lua");
-  shared_ptr<instance_broadcast> ib(new instance_broadcast);
-  ib->broker_id = 42;
-  ib->broker_name = "broker name";
-  ib->enabled = true;
-  ib->poller_id = 18;
-  ib->poller_name = "MyPoller";
-  _cache->write(ib);
+  std::shared_ptr<neb::instance> inst(new neb::instance);
+  inst->broker_id = 42;
+  inst->engine = "engine name";
+  inst->is_running = true;
+  inst->poller_id = 18;
+  inst->name = "MyPoller";
+  _cache->write(inst);
 
-  CreateScript(filename, "function init(conf)\n"
-                         "  broker_log:set_parameters(3, '/tmp/log')\n"
-                         "  local instance_name = broker_cache:get_instance_name(18)\n"
-                         "  broker_log:info(1, 'instance name is ' .. tostring(instance_name))\n"
-                         "end\n\n"
-                         "function write(d)\n"
-                         "end\n");
-  std::auto_ptr<luabinding> binding(new luabinding(filename, conf, *_cache.get()));
+  CreateScript(
+      filename,
+      "function init(conf)\n"
+      "  broker_log:set_parameters(3, '/tmp/log')\n"
+      "  local instance_name = broker_cache:get_instance_name(18)\n"
+      "  broker_log:info(1, 'instance name is ' .. tostring(instance_name))\n"
+      "end\n\n"
+      "function write(d)\n"
+      "end\n");
+  std::unique_ptr<luabinding> binding(
+      new luabinding(filename, conf, *_cache.get()));
   QStringList lst(ReadFile("/tmp/log"));
 
   ASSERT_TRUE(lst[0].contains("instance name is MyPoller"));
@@ -565,23 +590,25 @@ TEST_F(LuaGenericTest, InstanceNameCacheTest) {
 // When a query for a metric mapping is made
 // And the cache knows about it
 // Then the metric mapping is returned from the lua method.
-TEST_F(LuaGenericTest, MetricMappingCacheTest) {
+TEST_F(LuaTest, MetricMappingCacheTest) {
   QMap<QString, QVariant> conf;
   std::string filename("/tmp/cache_test.lua");
-  shared_ptr<storage::metric_mapping> mm(new storage::metric_mapping);
+  std::shared_ptr<storage::metric_mapping> mm(new storage::metric_mapping);
   mm->index_id = 19;
   mm->metric_id = 27;
   _cache->write(mm);
 
-  CreateScript(filename, "function init(conf)\n"
-                         "  broker_log:set_parameters(3, '/tmp/log')\n"
-                         "  local mm = broker_cache:get_metric_mapping(27)\n"
-                         "  broker_log:info(1, 'metric id is ' .. mm.metric_id)\n"
-                         "  broker_log:info(1, 'index id is ' .. mm.index_id)\n"
-                         "end\n\n"
-                         "function write(d)\n"
-                         "end\n");
-  std::auto_ptr<luabinding> binding(new luabinding(filename, conf, *_cache.get()));
+  CreateScript(filename,
+               "function init(conf)\n"
+               "  broker_log:set_parameters(3, '/tmp/log')\n"
+               "  local mm = broker_cache:get_metric_mapping(27)\n"
+               "  broker_log:info(1, 'metric id is ' .. mm.metric_id)\n"
+               "  broker_log:info(1, 'index id is ' .. mm.index_id)\n"
+               "end\n\n"
+               "function write(d)\n"
+               "end\n");
+  std::unique_ptr<luabinding> binding(
+      new luabinding(filename, conf, *_cache.get()));
   QStringList lst(ReadFile("/tmp/log"));
 
   ASSERT_TRUE(lst[0].contains("metric id is 27"));
@@ -593,18 +620,20 @@ TEST_F(LuaGenericTest, MetricMappingCacheTest) {
 // When a query for a host group name is made
 // And the cache does not know about it
 // Then nil is returned by the lua method.
-TEST_F(LuaGenericTest, HostGroupCacheTestNameNotAvailable) {
+TEST_F(LuaTest, HostGroupCacheTestNameNotAvailable) {
   QMap<QString, QVariant> conf;
   std::string filename("/tmp/cache_test.lua");
 
-  CreateScript(filename, "function init(conf)\n"
-                         "  broker_log:set_parameters(3, '/tmp/log')\n"
-                         "  local hg = broker_cache:get_hostgroup_name(28)\n"
-                         "  broker_log:info(1, 'host group is ' .. tostring(hg))\n"
-                         "end\n\n"
-                         "function write(d)\n"
-                         "end\n");
-  std::auto_ptr<luabinding> binding(new luabinding(filename, conf, *_cache.get()));
+  CreateScript(filename,
+               "function init(conf)\n"
+               "  broker_log:set_parameters(3, '/tmp/log')\n"
+               "  local hg = broker_cache:get_hostgroup_name(28)\n"
+               "  broker_log:info(1, 'host group is ' .. tostring(hg))\n"
+               "end\n\n"
+               "function write(d)\n"
+               "end\n");
+  std::unique_ptr<luabinding> binding(
+      new luabinding(filename, conf, *_cache.get()));
   QStringList lst(ReadFile("/tmp/log"));
 
   ASSERT_TRUE(lst[0].contains("host group is nil"));
@@ -615,22 +644,24 @@ TEST_F(LuaGenericTest, HostGroupCacheTestNameNotAvailable) {
 // When a query for a host group name is made
 // And the cache does know about it
 // Then the name is returned by the lua method.
-TEST_F(LuaGenericTest, HostGroupCacheTestName) {
+TEST_F(LuaTest, HostGroupCacheTestName) {
   QMap<QString, QVariant> conf;
   std::string filename("/tmp/cache_test.lua");
-  shared_ptr<neb::host_group> hg(new neb::host_group);
+  std::shared_ptr<neb::host_group> hg(new neb::host_group);
   hg->id = 28;
   hg->name = strdup("centreon");
   _cache->write(hg);
 
-  CreateScript(filename, "function init(conf)\n"
-                         "  broker_log:set_parameters(3, '/tmp/log')\n"
-                         "  local hg = broker_cache:get_hostgroup_name(28)\n"
-                         "  broker_log:info(1, 'host group is ' .. tostring(hg))\n"
-                         "end\n\n"
-                         "function write(d)\n"
-                         "end\n");
-  std::auto_ptr<luabinding> binding(new luabinding(filename, conf, *_cache.get()));
+  CreateScript(filename,
+               "function init(conf)\n"
+               "  broker_log:set_parameters(3, '/tmp/log')\n"
+               "  local hg = broker_cache:get_hostgroup_name(28)\n"
+               "  broker_log:info(1, 'host group is ' .. tostring(hg))\n"
+               "end\n\n"
+               "function write(d)\n"
+               "end\n");
+  std::unique_ptr<luabinding> binding(
+      new luabinding(filename, conf, *_cache.get()));
   QStringList lst(ReadFile("/tmp/log"));
 
   ASSERT_TRUE(lst[0].contains("host group is centreon"));
@@ -641,18 +672,21 @@ TEST_F(LuaGenericTest, HostGroupCacheTestName) {
 // When a query for host groups is made
 // And the host is attached to no group
 // Then an empty array is returned.
-TEST_F(LuaGenericTest, HostGroupCacheTestEmpty) {
+TEST_F(LuaTest, HostGroupCacheTestEmpty) {
   QMap<QString, QVariant> conf;
   std::string filename("/tmp/cache_test.lua");
 
-  CreateScript(filename, "function init(conf)\n"
-                         "  broker_log:set_parameters(3, '/tmp/log')\n"
-                         "  local hg = broker_cache:get_hostgroups(1)\n"
-                         "  broker_log:info(1, 'host group is ' .. broker.json_encode(hg))\n"
-                         "end\n\n"
-                         "function write(d)\n"
-                         "end\n");
-  std::auto_ptr<luabinding> binding(new luabinding(filename, conf, *_cache.get()));
+  CreateScript(
+      filename,
+      "function init(conf)\n"
+      "  broker_log:set_parameters(3, '/tmp/log')\n"
+      "  local hg = broker_cache:get_hostgroups(1)\n"
+      "  broker_log:info(1, 'host group is ' .. broker.json_encode(hg))\n"
+      "end\n\n"
+      "function write(d)\n"
+      "end\n");
+  std::unique_ptr<luabinding> binding(
+      new luabinding(filename, conf, *_cache.get()));
   QStringList lst(ReadFile("/tmp/log"));
 
   ASSERT_TRUE(lst[0].contains("host group is []"));
@@ -663,29 +697,29 @@ TEST_F(LuaGenericTest, HostGroupCacheTestEmpty) {
 // When a query for host groups is made
 // And the cache does know about them
 // Then an array is returned by the lua method.
-TEST_F(LuaGenericTest, HostGroupCacheTest) {
+TEST_F(LuaTest, HostGroupCacheTest) {
   QMap<QString, QVariant> conf;
   std::string filename("/tmp/cache_test.lua");
-  shared_ptr<neb::host_group> hg(new neb::host_group);
+  std::shared_ptr<neb::host_group> hg(new neb::host_group);
   hg->id = 16;
   hg->name = strdup("centreon1");
   _cache->write(hg);
-  hg = new neb::host_group;
+  hg.reset(new neb::host_group);
   hg->id = 17;
   hg->name = strdup("centreon2");
   _cache->write(hg);
-  shared_ptr<neb::host> hst(new neb::host);
+  std::shared_ptr<neb::host> hst(new neb::host);
   hst->host_id = 22;
   hst->host_name = strdup("host_centreon");
   _cache->write(hst);
-  shared_ptr<neb::host_group_member> member(new neb::host_group_member);
+  std::shared_ptr<neb::host_group_member> member(new neb::host_group_member);
   member->host_id = 22;
   member->group_id = 16;
   member->group_name = "sixteen";
   member->enabled = false;
   member->poller_id = 14;
   _cache->write(member);
-  member = new neb::host_group_member;
+  member.reset(new neb::host_group_member);
   member->host_id = 22;
   member->group_id = 17;
   member->group_name = "seventeen";
@@ -693,16 +727,18 @@ TEST_F(LuaGenericTest, HostGroupCacheTest) {
   member->poller_id = 144;
   _cache->write(member);
 
-  CreateScript(filename, "function init(conf)\n"
-                         "  broker_log:set_parameters(3, '/tmp/log')\n"
-                         "  local hg = broker_cache:get_hostgroups(22)\n"
-                         "  for i,v in ipairs(hg) do\n"
-                         "    broker_log:info(1, 'member of ' .. broker.json_encode(v))\n"
-                         "  end\n"
-                         "end\n\n"
-                         "function write(d)\n"
-                         "end\n");
-  std::auto_ptr<luabinding> binding(new luabinding(filename, conf, *_cache.get()));
+  CreateScript(filename,
+               "function init(conf)\n"
+               "  broker_log:set_parameters(3, '/tmp/log')\n"
+               "  local hg = broker_cache:get_hostgroups(22)\n"
+               "  for i,v in ipairs(hg) do\n"
+               "    broker_log:info(1, 'member of ' .. broker.json_encode(v))\n"
+               "  end\n"
+               "end\n\n"
+               "function write(d)\n"
+               "end\n");
+  std::unique_ptr<luabinding> binding(
+      new luabinding(filename, conf, *_cache.get()));
   QStringList lst(ReadFile("/tmp/log"));
 
   ASSERT_TRUE(lst[0].contains("\"group_id\":17"));
@@ -715,18 +751,20 @@ TEST_F(LuaGenericTest, HostGroupCacheTest) {
 // When a query for a service group name is made
 // And the cache does not know about it
 // Then nil is returned by the lua method.
-TEST_F(LuaGenericTest, ServiceGroupCacheTestNameNotAvailable) {
+TEST_F(LuaTest, ServiceGroupCacheTestNameNotAvailable) {
   QMap<QString, QVariant> conf;
   std::string filename("/tmp/cache_test.lua");
 
-  CreateScript(filename, "function init(conf)\n"
-                         "  broker_log:set_parameters(3, '/tmp/log')\n"
-                         "  local hg = broker_cache:get_servicegroup_name(28)\n"
-                         "  broker_log:info(1, 'service group is ' .. tostring(hg))\n"
-                         "end\n\n"
-                         "function write(d)\n"
-                         "end\n");
-  std::auto_ptr<luabinding> binding(new luabinding(filename, conf, *_cache.get()));
+  CreateScript(filename,
+               "function init(conf)\n"
+               "  broker_log:set_parameters(3, '/tmp/log')\n"
+               "  local hg = broker_cache:get_servicegroup_name(28)\n"
+               "  broker_log:info(1, 'service group is ' .. tostring(hg))\n"
+               "end\n\n"
+               "function write(d)\n"
+               "end\n");
+  std::unique_ptr<luabinding> binding(
+      new luabinding(filename, conf, *_cache.get()));
   QStringList lst(ReadFile("/tmp/log"));
 
   ASSERT_TRUE(lst[0].contains("service group is nil"));
@@ -737,22 +775,24 @@ TEST_F(LuaGenericTest, ServiceGroupCacheTestNameNotAvailable) {
 // When a query for a service group name is made
 // And the cache does know about it
 // Then the name is returned by the lua method.
-TEST_F(LuaGenericTest, ServiceGroupCacheTestName) {
+TEST_F(LuaTest, ServiceGroupCacheTestName) {
   QMap<QString, QVariant> conf;
   std::string filename("/tmp/cache_test.lua");
-  shared_ptr<neb::service_group> sg(new neb::service_group);
+  std::shared_ptr<neb::service_group> sg(new neb::service_group);
   sg->id = 28;
   sg->name = strdup("centreon");
   _cache->write(sg);
 
-  CreateScript(filename, "function init(conf)\n"
-                         "  broker_log:set_parameters(3, '/tmp/log')\n"
-                         "  local sg = broker_cache:get_servicegroup_name(28)\n"
-                         "  broker_log:info(1, 'service group is ' .. tostring(sg))\n"
-                         "end\n\n"
-                         "function write(d)\n"
-                         "end\n");
-  std::auto_ptr<luabinding> binding(new luabinding(filename, conf, *_cache.get()));
+  CreateScript(filename,
+               "function init(conf)\n"
+               "  broker_log:set_parameters(3, '/tmp/log')\n"
+               "  local sg = broker_cache:get_servicegroup_name(28)\n"
+               "  broker_log:info(1, 'service group is ' .. tostring(sg))\n"
+               "end\n\n"
+               "function write(d)\n"
+               "end\n");
+  std::unique_ptr<luabinding> binding(
+      new luabinding(filename, conf, *_cache.get()));
   QStringList lst(ReadFile("/tmp/log"));
 
   ASSERT_TRUE(lst[0].contains("service group is centreon"));
@@ -763,18 +803,21 @@ TEST_F(LuaGenericTest, ServiceGroupCacheTestName) {
 // When a query for service groups is made
 // And the service is attached to no group
 // Then an empty array is returned.
-TEST_F(LuaGenericTest, ServiceGroupCacheTestEmpty) {
+TEST_F(LuaTest, ServiceGroupCacheTestEmpty) {
   QMap<QString, QVariant> conf;
   std::string filename("/tmp/cache_test.lua");
 
-  CreateScript(filename, "function init(conf)\n"
-                         "  broker_log:set_parameters(3, '/tmp/log')\n"
-                         "  local sg = broker_cache:get_servicegroups(1, 3)\n"
-                         "  broker_log:info(1, 'service group is ' .. broker.json_encode(sg))\n"
-                         "end\n\n"
-                         "function write(d)\n"
-                         "end\n");
-  std::auto_ptr<luabinding> binding(new luabinding(filename, conf, *_cache.get()));
+  CreateScript(
+      filename,
+      "function init(conf)\n"
+      "  broker_log:set_parameters(3, '/tmp/log')\n"
+      "  local sg = broker_cache:get_servicegroups(1, 3)\n"
+      "  broker_log:info(1, 'service group is ' .. broker.json_encode(sg))\n"
+      "end\n\n"
+      "function write(d)\n"
+      "end\n");
+  std::unique_ptr<luabinding> binding(
+      new luabinding(filename, conf, *_cache.get()));
   QStringList lst(ReadFile("/tmp/log"));
 
   ASSERT_TRUE(lst[0].contains("service group is []"));
@@ -785,24 +828,25 @@ TEST_F(LuaGenericTest, ServiceGroupCacheTestEmpty) {
 // When a query for service groups is made
 // And the cache does know about them
 // Then an array is returned by the lua method.
-TEST_F(LuaGenericTest, ServiceGroupCacheTest) {
+TEST_F(LuaTest, ServiceGroupCacheTest) {
   QMap<QString, QVariant> conf;
   std::string filename("/tmp/cache_test.lua");
-  shared_ptr<neb::service_group> sg(new neb::service_group);
+  std::shared_ptr<neb::service_group> sg(new neb::service_group);
   sg->id = 16;
   sg->name = strdup("centreon1");
   _cache->write(sg);
-  sg = new neb::service_group;
+  sg.reset(new neb::service_group);
   sg->id = 17;
   sg->name = strdup("centreon2");
   _cache->write(sg);
-  shared_ptr<neb::service> svc(new neb::service);
+  std::shared_ptr<neb::service> svc(new neb::service);
   svc->service_id = 17;
   svc->host_id = 22;
   svc->host_name = strdup("host_centreon");
   svc->service_description = strdup("service_description");
   _cache->write(svc);
-  shared_ptr<neb::service_group_member> member(new neb::service_group_member);
+  std::shared_ptr<neb::service_group_member> member(
+      new neb::service_group_member);
   member->host_id = 22;
   member->service_id = 17;
   member->poller_id = 3;
@@ -810,7 +854,7 @@ TEST_F(LuaGenericTest, ServiceGroupCacheTest) {
   member->group_id = 16;
   member->group_name = "seize";
   _cache->write(member);
-  member = new neb::service_group_member;
+  member.reset(new neb::service_group_member);
   member->host_id = 22;
   member->service_id = 17;
   member->poller_id = 4;
@@ -819,16 +863,18 @@ TEST_F(LuaGenericTest, ServiceGroupCacheTest) {
   member->group_name = "dix-sept";
   _cache->write(member);
 
-  CreateScript(filename, "function init(conf)\n"
-                         "  broker_log:set_parameters(3, '/tmp/log')\n"
-                         "  local sg = broker_cache:get_servicegroups(22, 17)\n"
-                         "  for i,v in ipairs(sg) do\n"
-                         "    broker_log:info(1, 'member of ' .. broker.json_encode(v))\n"
-                         "  end\n"
-                         "end\n\n"
-                         "function write(d)\n"
-                         "end\n");
-  std::auto_ptr<luabinding> binding(new luabinding(filename, conf, *_cache.get()));
+  CreateScript(filename,
+               "function init(conf)\n"
+               "  broker_log:set_parameters(3, '/tmp/log')\n"
+               "  local sg = broker_cache:get_servicegroups(22, 17)\n"
+               "  for i,v in ipairs(sg) do\n"
+               "    broker_log:info(1, 'member of ' .. broker.json_encode(v))\n"
+               "  end\n"
+               "end\n\n"
+               "function write(d)\n"
+               "end\n");
+  std::unique_ptr<luabinding> binding(
+      new luabinding(filename, conf, *_cache.get()));
   QStringList lst(ReadFile("/tmp/log"));
 
   ASSERT_TRUE(lst[0].contains("\"group_id\":17"));
@@ -841,40 +887,41 @@ TEST_F(LuaGenericTest, ServiceGroupCacheTest) {
 // When a query for service groups is made
 // And the cache does know about them
 // Then an array is returned by the lua method.
-TEST_F(LuaGenericTest, SetNewInstance) {
+TEST_F(LuaTest, SetNewInstance) {
   QMap<QString, QVariant> conf;
   std::string filename("/tmp/cache_test.lua");
-  shared_ptr<neb::service_group> sg(new neb::service_group);
+  std::shared_ptr<neb::service_group> sg(new neb::service_group);
   sg->id = 16;
   sg->name = strdup("centreon1");
   _cache->write(sg);
-  sg = new neb::service_group;
+  sg.reset(new neb::service_group);
   sg->id = 17;
   sg->name = strdup("centreon2");
   _cache->write(sg);
-  shared_ptr<neb::host> hst(new neb::host);
+  std::shared_ptr<neb::host> hst(new neb::host);
   hst->host_id = 22;
   hst->host_name = strdup("host_centreon");
   hst->poller_id = 3;
   _cache->write(hst);
-  shared_ptr<neb::host_group> hg(new neb::host_group);
+  std::shared_ptr<neb::host_group> hg(new neb::host_group);
   hg->id = 19;
   hg->name = strdup("hg1");
   _cache->write(hg);
-  shared_ptr<neb::service> svc(new neb::service);
+  std::shared_ptr<neb::service> svc(new neb::service);
   svc->service_id = 17;
   svc->host_id = 22;
   svc->host_name = strdup("host_centreon");
   svc->service_description = strdup("service_description");
   _cache->write(svc);
-  shared_ptr<neb::host_group_member> hmember(new neb::host_group_member);
+  std::shared_ptr<neb::host_group_member> hmember(new neb::host_group_member);
   hmember->host_id = 22;
   hmember->poller_id = 3;
   hmember->enabled = true;
   hmember->group_id = 19;
   hmember->group_name = "hg1";
   _cache->write(hmember);
-  shared_ptr<neb::service_group_member> member(new neb::service_group_member);
+  std::shared_ptr<neb::service_group_member> member(
+      new neb::service_group_member);
   member->host_id = 22;
   member->service_id = 17;
   member->poller_id = 3;
@@ -882,7 +929,7 @@ TEST_F(LuaGenericTest, SetNewInstance) {
   member->group_id = 16;
   member->group_name = "seize";
   _cache->write(member);
-  member = new neb::service_group_member;
+  member.reset(new neb::service_group_member);
   member->host_id = 22;
   member->service_id = 17;
   member->poller_id = 3;
@@ -891,22 +938,24 @@ TEST_F(LuaGenericTest, SetNewInstance) {
   member->group_name = "dix-sept";
   _cache->write(member);
 
-  shared_ptr<instance_broadcast> ib(new instance_broadcast);
+  std::shared_ptr<neb::instance> ib(new neb::instance);
   ib->broker_id = 42;
-  ib->broker_name = "broker name";
-  ib->enabled = true;
+  ib->engine = "engine name";
+  ib->is_running = true;
   ib->poller_id = 3;
-  ib->poller_name = "MyPoller";
+  ib->name = "MyPoller";
   _cache->write(ib);
 
-  CreateScript(filename, "function init(conf)\n"
-                         "  broker_log:set_parameters(3, '/tmp/log')\n"
-                         "  local s = broker_cache:get_service_description(22, 17)\n"
-                         "  broker_log:info(1, 'service description ' .. tostring(s))\n"
-                         "end\n\n"
-                         "function write(d)\n"
-                         "end\n");
-  std::auto_ptr<luabinding> binding(new luabinding(filename, conf, *_cache.get()));
+  CreateScript(filename,
+               "function init(conf)\n"
+               "  broker_log:set_parameters(3, '/tmp/log')\n"
+               "  local s = broker_cache:get_service_description(22, 17)\n"
+               "  broker_log:info(1, 'service description ' .. tostring(s))\n"
+               "end\n\n"
+               "function write(d)\n"
+               "end\n");
+  std::unique_ptr<luabinding> binding(
+      new luabinding(filename, conf, *_cache.get()));
   QStringList lst(ReadFile("/tmp/log"));
 
   ASSERT_TRUE(lst[0].contains("service description nil"));
@@ -918,38 +967,39 @@ TEST_F(LuaGenericTest, SetNewInstance) {
 // When a query for bvs containing a ba is made
 // And the cache does know about them
 // Then an array with bvs id is returned by the lua method.
-TEST_F(LuaGenericTest, BamCacheTestBvBaRelation) {
+TEST_F(LuaTest, BamCacheTestBvBaRelation) {
   QMap<QString, QVariant> conf;
   std::string filename("/tmp/cache_test.lua");
-  shared_ptr<bam::dimension_ba_bv_relation_event> rel(
-    new bam::dimension_ba_bv_relation_event);
+  std::shared_ptr<bam::dimension_ba_bv_relation_event> rel(
+      new bam::dimension_ba_bv_relation_event);
   rel->ba_id = 10;
   rel->bv_id = 18;
   _cache->write(rel);
 
-  rel = new bam::dimension_ba_bv_relation_event;
+  rel.reset(new bam::dimension_ba_bv_relation_event);
   rel->ba_id = 10;
   rel->bv_id = 23;
   _cache->write(rel);
 
-  CreateScript(filename, "function init(conf)\n"
-                         "  broker_log:set_parameters(3, '/tmp/log')\n"
-                         "  local rel = broker_cache:get_bvs(10)\n"
-                         "  for i,v in ipairs(rel) do\n"
-                         "    broker_log:info(1, 'member of bv ' .. v)\n"
-                         "  end\n"
-                         "end\n\n"
-                         "function write(d)\n"
-                         "end\n");
-  std::auto_ptr<luabinding> binding(new luabinding(filename, conf, *_cache.get()));
+  CreateScript(filename,
+               "function init(conf)\n"
+               "  broker_log:set_parameters(3, '/tmp/log')\n"
+               "  local rel = broker_cache:get_bvs(10)\n"
+               "  for i,v in ipairs(rel) do\n"
+               "    broker_log:info(1, 'member of bv ' .. v)\n"
+               "  end\n"
+               "end\n\n"
+               "function write(d)\n"
+               "end\n");
+  std::unique_ptr<luabinding> binding(
+      new luabinding(filename, conf, *_cache.get()));
   QStringList lst(ReadFile("/tmp/log"));
 
   int first, second;
   if (lst[0].contains("member of bv 18")) {
     first = 0;
     second = 1;
-  }
-  else {
+  } else {
     first = 1;
     second = 0;
   }
@@ -963,11 +1013,10 @@ TEST_F(LuaGenericTest, BamCacheTestBvBaRelation) {
 // Given a ba id,
 // When the Lua get_ba() function is called with it,
 // Then a table corresponding to this ba is returned.
-TEST_F(LuaGenericTest, BamCacheTestBa) {
+TEST_F(LuaTest, BamCacheTestBa) {
   QMap<QString, QVariant> conf;
   std::string filename("/tmp/cache_test.lua");
-  shared_ptr<bam::dimension_ba_event> ba(
-    new bam::dimension_ba_event);
+  std::shared_ptr<bam::dimension_ba_event> ba(new bam::dimension_ba_event);
   ba->ba_id = 10;
   ba->ba_name = "ba name";
   ba->ba_description = "ba description";
@@ -977,14 +1026,17 @@ TEST_F(LuaGenericTest, BamCacheTestBa) {
   ba->sla_duration_warn = 23;
   _cache->write(ba);
 
-  CreateScript(filename, "function init(conf)\n"
-                         "  broker_log:set_parameters(3, '/tmp/log')\n"
-                         "  local ba = broker_cache:get_ba(10)\n"
-                         "  broker_log:info(1, 'member of ba ' .. broker.json_encode(ba))\n"
-                         "end\n\n"
-                         "function write(d)\n"
-                         "end\n");
-  std::auto_ptr<luabinding> binding(new luabinding(filename, conf, *_cache.get()));
+  CreateScript(
+      filename,
+      "function init(conf)\n"
+      "  broker_log:set_parameters(3, '/tmp/log')\n"
+      "  local ba = broker_cache:get_ba(10)\n"
+      "  broker_log:info(1, 'member of ba ' .. broker.json_encode(ba))\n"
+      "end\n\n"
+      "function write(d)\n"
+      "end\n");
+  std::unique_ptr<luabinding> binding(
+      new luabinding(filename, conf, *_cache.get()));
   QStringList lst(ReadFile("/tmp/log"));
 
   ASSERT_TRUE(lst[0].contains("\"ba_name\":\"ba name\""));
@@ -998,18 +1050,20 @@ TEST_F(LuaGenericTest, BamCacheTestBa) {
 // When the Lua get_ba() function is called with it,
 // And the cache does not know about it,
 // Then nil is returned.
-TEST_F(LuaGenericTest, BamCacheTestBaNil) {
+TEST_F(LuaTest, BamCacheTestBaNil) {
   QMap<QString, QVariant> conf;
   std::string filename("/tmp/cache_test.lua");
 
-  CreateScript(filename, "function init(conf)\n"
-                         "  broker_log:set_parameters(3, '/tmp/log')\n"
-                         "  local ba = broker_cache:get_ba(10)\n"
-                         "  broker_log:info(1, 'member of ba ' .. tostring(ba))\n"
-                         "end\n\n"
-                         "function write(d)\n"
-                         "end\n");
-  std::auto_ptr<luabinding> binding(new luabinding(filename, conf, *_cache.get()));
+  CreateScript(filename,
+               "function init(conf)\n"
+               "  broker_log:set_parameters(3, '/tmp/log')\n"
+               "  local ba = broker_cache:get_ba(10)\n"
+               "  broker_log:info(1, 'member of ba ' .. tostring(ba))\n"
+               "end\n\n"
+               "function write(d)\n"
+               "end\n");
+  std::unique_ptr<luabinding> binding(
+      new luabinding(filename, conf, *_cache.get()));
   QStringList lst(ReadFile("/tmp/log"));
 
   ASSERT_TRUE(lst[0].contains("member of ba nil"));
@@ -1021,24 +1075,26 @@ TEST_F(LuaGenericTest, BamCacheTestBaNil) {
 // Given a bv id,
 // When the Lua get_bv() function is called with it,
 // Then a table corresponding to this bv is returned.
-TEST_F(LuaGenericTest, BamCacheTestBv) {
+TEST_F(LuaTest, BamCacheTestBv) {
   QMap<QString, QVariant> conf;
   std::string filename("/tmp/cache_test.lua");
-  shared_ptr<bam::dimension_bv_event> bv(
-    new bam::dimension_bv_event);
+  std::shared_ptr<bam::dimension_bv_event> bv(new bam::dimension_bv_event);
   bv->bv_id = 10;
   bv->bv_name = "bv name";
   bv->bv_description = "bv description";
   _cache->write(bv);
 
-  CreateScript(filename, "function init(conf)\n"
-                         "  broker_log:set_parameters(3, '/tmp/log')\n"
-                         "  local bv = broker_cache:get_bv(10)\n"
-                         "  broker_log:info(1, 'member of bv ' .. broker.json_encode(bv))\n"
-                         "end\n\n"
-                         "function write(d)\n"
-                         "end\n");
-  std::auto_ptr<luabinding> binding(new luabinding(filename, conf, *_cache.get()));
+  CreateScript(
+      filename,
+      "function init(conf)\n"
+      "  broker_log:set_parameters(3, '/tmp/log')\n"
+      "  local bv = broker_cache:get_bv(10)\n"
+      "  broker_log:info(1, 'member of bv ' .. broker.json_encode(bv))\n"
+      "end\n\n"
+      "function write(d)\n"
+      "end\n");
+  std::unique_ptr<luabinding> binding(
+      new luabinding(filename, conf, *_cache.get()));
   QStringList lst(ReadFile("/tmp/log"));
 
   ASSERT_TRUE(lst[0].contains("\"bv_id\":10"));
@@ -1053,22 +1109,180 @@ TEST_F(LuaGenericTest, BamCacheTestBv) {
 // When the Lua get_bv() function is called with it,
 // And the cache does not know about it,
 // Then nil is returned.
-TEST_F(LuaGenericTest, BamCacheTestBvNil) {
+TEST_F(LuaTest, BamCacheTestBvNil) {
   QMap<QString, QVariant> conf;
   std::string filename("/tmp/cache_test.lua");
 
-  CreateScript(filename, "function init(conf)\n"
-                         "  broker_log:set_parameters(3, '/tmp/log')\n"
-                         "  local bv = broker_cache:get_bv(10)\n"
-                         "  broker_log:info(1, 'member of bv ' .. tostring(bv))\n"
-                         "end\n\n"
-                         "function write(d)\n"
-                         "end\n");
-  std::auto_ptr<luabinding> binding(new luabinding(filename, conf, *_cache.get()));
+  CreateScript(filename,
+               "function init(conf)\n"
+               "  broker_log:set_parameters(3, '/tmp/log')\n"
+               "  local bv = broker_cache:get_bv(10)\n"
+               "  broker_log:info(1, 'member of bv ' .. tostring(bv))\n"
+               "end\n\n"
+               "function write(d)\n"
+               "end\n");
+  std::unique_ptr<luabinding> binding(
+      new luabinding(filename, conf, *_cache.get()));
   QStringList lst(ReadFile("/tmp/log"));
 
   ASSERT_TRUE(lst[0].contains("member of bv nil"));
 
   RemoveFile(filename);
   RemoveFile("/tmp/log");
+}
+
+TEST_F(LuaTest, ParsePerfdata) {
+  QMap<QString, QVariant> conf;
+  std::string filename("/tmp/parse_perfdata.lua");
+
+  CreateScript(
+      filename,
+      "local function test_perf(value, full)\n"
+      "  perf, err_msg = broker.parse_perfdata(value, full)\n"
+      "  if perf then\n"
+      "    broker_log:info(1, broker.json_encode(perf))\n"
+      "  else\n"
+      "    broker_log:info(1, err_msg)\n"
+      "  end \n"
+      "end\n\n"
+      "function init(conf)\n"
+      "  broker_log:set_parameters(3, '/tmp/log')\n"
+      "  test_perf(' percent_packet_loss=0 rta=0.80')\n"
+      "  test_perf(\" 'one value'=0 'another value'=0.89\")\n"
+      "  test_perf(\" 'one value'=0;3;5 'another value'=0.89;0.8;1;;\")\n"
+      "  test_perf(\" 'one value'=1;3;5;0;9 'another "
+      "value'=10.89;0.8;1;0;20\")\n"
+      "  test_perf(\" 'one value'=2s;3;5;0;9 'a b c'=3.14KB;0.8;1;0;10\")\n"
+      "  test_perf(' percent_packet_loss=1.74;50;80;0;100 rta=0.80', true)\n"
+      "  test_perf(\" 'one value'=12%;25:80;81:95 'another "
+      "value'=78%;60;90;;\", true)\n"
+      "  test_perf(\"                \")\n"
+      "  test_perf(\" 'one value' 0;3;5\")\n"
+      "  test_perf(\" 'events'=;;;0;\")\n"
+      "end\n\n"
+      "function write(d)\n"
+      "end\n");
+  std::unique_ptr<luabinding> binding(
+      new luabinding(filename, conf, *_cache.get()));
+  QStringList lst(ReadFile("/tmp/log"));
+
+  ASSERT_TRUE(lst[0].contains("\"percent_packet_loss\":0"));
+  ASSERT_TRUE(lst[0].contains("\"rta\":0.8"));
+  ASSERT_TRUE(lst[1].contains("\"one value\":0"));
+  ASSERT_TRUE(lst[1].contains("\"another value\":0.89"));
+  ASSERT_TRUE(lst[2].contains("\"one value\":0"));
+  ASSERT_TRUE(lst[2].contains("\"another value\":0.89"));
+  ASSERT_TRUE(lst[3].contains("\"one value\":1"));
+  ASSERT_TRUE(lst[3].contains("\"another value\":10.89"));
+  ASSERT_TRUE(lst[4].contains("\"one value\":2"));
+  ASSERT_TRUE(lst[4].contains("\"a b c\":3.14"));
+  ASSERT_TRUE(lst[5].contains("\"value\":1.74"));
+  ASSERT_TRUE(lst[5].contains("\"warning_high\":50"));
+  ASSERT_TRUE(lst[5].contains("\"critical_high\":80"));
+  ASSERT_TRUE(lst[6].contains("\"value\":12"));
+  ASSERT_TRUE(lst[6].contains("\"warning_low\":25"));
+  ASSERT_TRUE(lst[6].contains("\"warning_high\":80"));
+  ASSERT_TRUE(lst[6].contains("\"critical_low\":81"));
+  ASSERT_TRUE(lst[6].contains("\"critical_high\":95"));
+  ASSERT_TRUE(lst[8].contains(
+      "storage: invalid perfdata format: equal sign not present or misplaced"));
+  ASSERT_TRUE(lst[9].contains(
+      "storage: invalid perfdata format: no numeric value after equal sign"));
+
+  RemoveFile(filename);
+  RemoveFile("/tmp/log");
+}
+
+// Given a script requiring another one with the same path.
+// When the first script call a function defined in the second one
+// Then the call works.
+TEST_F(LuaTest, UpdatePath) {
+  QMap<QString, QVariant> conf;
+  std::string filename("/tmp/test.lua");
+  std::string module("/tmp/module.lua");
+
+  CreateScript(module,
+               "local my_module = {}\n"
+               "function my_module.test()\n"
+               "  return 'foo bar'\n"
+               "end\n\n"
+               "return my_module");
+  CreateScript(filename,
+               "local my_module = require('module')\n"
+               "function init(conf)\n"
+               "  broker_log:set_parameters(3, '/tmp/log')\n"
+               "  broker_log:info(0, my_module.test())\n"
+               "end\n\n"
+               "function write(d)\n"
+               "  return true\n"
+               "end\n");
+  std::unique_ptr<luabinding> binding(
+      new luabinding(filename, conf, *_cache.get()));
+  QStringList lst(ReadFile("/tmp/log"));
+
+  ASSERT_TRUE(lst[0].contains("foo bar"));
+
+  RemoveFile(module);
+  RemoveFile(filename);
+  RemoveFile("/tmp/log");
+}
+
+TEST_F(LuaTest, CheckPath) {
+  QMap<QString, QVariant> conf;
+  std::string filename("/tmp/test.lua");
+
+  CreateScript(filename,
+               "function init(conf)\n"
+               "  broker_log:set_parameters(3, '/tmp/log')\n"
+               "  broker_log:info(0, package.path)\n"
+               "  broker_log:info(0, package.cpath)\n"
+               "end\n\n"
+               "function write(d)\n"
+               "  return true\n"
+               "end\n");
+  std::unique_ptr<luabinding> binding(new luabinding(filename, conf, *_cache));
+  QStringList lst(ReadFile("/tmp/log"));
+
+  ASSERT_TRUE(lst[0].contains("/tmp/?.lua"));
+  ASSERT_TRUE(lst[1].contains("/tmp/lib/?.so"));
+
+  RemoveFile(filename);
+  RemoveFile("/tmp/log");
+}
+
+// Given a string
+// Then a call to broker.url_encode with this string URL encodes it.
+TEST_F(LuaTest, UrlEncode) {
+  QMap<QString, QVariant> conf;
+  std::string filename("/tmp/url_encode.lua");
+  CreateScript(
+      filename,
+      "function init(conf)\n"
+      "  broker_log:set_parameters(3, '/tmp/log')\n"
+      "  local res1 = broker.url_encode('This is a simple line')\n"
+      "  if res1 == 'This%20is%20a%20simple%20line' then\n"
+      "    broker_log:info(1, 'RES1 GOOD')\n"
+      "  end\n"
+      "  local res2 = broker.url_encode('La leçon du château de "
+      "l\\'araignée')\n"
+      "  if res2 == "
+      "'La%20le%C3%A7on%20du%20ch%C3%A2teau%20de%20l%27araign%C3%A9e' then\n"
+      "    broker_log:info(1, 'RES2 GOOD')\n"
+      "  end\n"
+      "  local res3 = broker.url_encode('A.a-b_B:c/C?d=D&e~')\n"
+      "  if res3 == 'A.a-b_B%3Ac%2FC%3Fd%3DD%26e~' then\n"
+      "    broker_log:info(1, 'RES3 GOOD')\n"
+      "  end\n"
+      "end\n\n"
+      "function write(d)\n"
+      "end\n");
+  std::unique_ptr<luabinding> binding(new luabinding(filename, conf, *_cache));
+  QStringList lst(ReadFile("/tmp/log"));
+
+  ASSERT_TRUE(lst[0].contains("RES1 GOOD"));
+  ASSERT_TRUE(lst[1].contains("RES2 GOOD"));
+  ASSERT_TRUE(lst[2].contains("RES3 GOOD"));
+
+  //  RemoveFile(filename);
+  //  RemoveFile("/tmp/log");
 }

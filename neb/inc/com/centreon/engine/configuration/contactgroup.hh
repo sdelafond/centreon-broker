@@ -1,5 +1,5 @@
 /*
-** Copyright 2011-2013 Merethis
+** Copyright 2011-2013,2017 Centreon
 **
 ** This file is part of Centreon Engine.
 **
@@ -30,12 +30,12 @@ CCE_BEGIN()
 
 namespace                  configuration {
   class                    contactgroup : public object {
-  public:
+   public:
     typedef std::string    key_type;
 
                            contactgroup(key_type const& key = "");
                            contactgroup(contactgroup const& right);
-                           ~contactgroup() throw ();
+                           ~contactgroup() throw () override;
     contactgroup&          operator=(contactgroup const& right);
     bool                   operator==(
                              contactgroup const& right) const throw ();
@@ -43,26 +43,20 @@ namespace                  configuration {
                              contactgroup const& right) const throw ();
     bool                   operator<(
                              contactgroup const& right) const throw ();
-    void                   check_validity() const;
+    void                   check_validity() const override;
     key_type const&        key() const throw ();
-    void                   merge(object const& obj);
-    bool                   parse(char const* key, char const* value);
+    void                   merge(object const& obj) override;
+    bool                   parse(char const* key, char const* value) override;
 
     std::string const&     alias() const throw ();
-    list_string const&     contactgroup_members() const throw ();
+    set_string&            contactgroup_members() throw ();
+    set_string const&      contactgroup_members() const throw ();
     std::string const&     contactgroup_name() const throw ();
-    list_string&           members() throw ();
-    list_string const&     members() const throw ();
+    set_string&            members() throw ();
+    set_string const&      members() const throw ();
 
-    bool                   is_resolved() const throw ();
-    set_string&            resolved_members() const throw ();
-    void                   set_resolved(bool resolved) const throw ();
-
-  private:
-    struct                 setters {
-      char const*          name;
-      bool                 (*func)(contactgroup&, char const*);
-    };
+   private:
+    typedef bool (*setter_func)(contactgroup&, char const*);
 
     bool                   _set_alias(std::string const& value);
     bool                   _set_contactgroup_members(std::string const& value);
@@ -70,16 +64,14 @@ namespace                  configuration {
     bool                   _set_members(std::string const& value);
 
     std::string            _alias;
-    group                  _contactgroup_members;
+    group<set_string>      _contactgroup_members;
     std::string            _contactgroup_name;
-    group                  _members;
-    mutable bool           _resolved;
-    mutable set_string     _resolved_members;
-    static setters const   _setters[];
+    group<set_string>      _members;
+    static std::unordered_map<std::string, setter_func> const _setters;
   };
 
-  typedef shared_ptr<contactgroup>   contactgroup_ptr;
-  typedef std::set<contactgroup_ptr> set_contactgroup;
+  typedef std::shared_ptr<contactgroup> contactgroup_ptr;
+  typedef std::set<contactgroup>        set_contactgroup;
 }
 
 CCE_END()

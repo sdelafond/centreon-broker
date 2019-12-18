@@ -46,7 +46,7 @@ namespace               lua {
                           macro_cache const& cache);
                         ~luabinding();
     bool                has_filter() const;
-    int                 write(misc::shared_ptr<io::data> const& data);
+    int                 write(std::shared_ptr<io::data> const& data);
 
    private:
                         luabinding(luabinding const& other);
@@ -55,6 +55,7 @@ namespace               lua {
     void                _load_script();
     void                _init_script(
                           QMap<QString, QVariant> const& conf_params);
+    void                _update_lua_path(std::string const& path);
 
     // Event conversion to Lua table.
     void                _parse_entries(io::data const& d);

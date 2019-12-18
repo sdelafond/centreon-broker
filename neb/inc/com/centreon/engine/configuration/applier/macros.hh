@@ -25,7 +25,7 @@
 #  include "com/centreon/engine/namespace.hh"
 
 // Forward declaration.
-struct nagios_macros;
+class nagios_macros;
 
 CCE_BEGIN()
 
@@ -39,7 +39,7 @@ namespace            configuration {
      */
     class            macros {
     public:
-      void           apply(state& config);
+      void           apply(configuration::state& config);
       static macros& instance();
       static void    load();
       static void    unload();

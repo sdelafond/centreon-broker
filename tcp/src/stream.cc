@@ -19,6 +19,7 @@
 #include <QWaitCondition>
 #include <sstream>
 #include <sys/socket.h>
+#include <sys/time.h>
 #include "com/centreon/broker/exceptions/msg.hh"
 #include "com/centreon/broker/io/raw.hh"
 #include "com/centreon/broker/logging/logging.hh"
@@ -101,7 +102,7 @@ std::string stream::peer() const {
  *  @return Respects io::stream::read()'s return value.
  */
 bool stream::read(
-               misc::shared_ptr<io::data>& d,
+               std::shared_ptr<io::data>& d,
                time_t deadline) {
   // Check that socket exist.
   if (!_socket.get())
@@ -117,7 +118,7 @@ bool stream::read(
   }
 
   // If data is already available, skip the waitForReadyRead() loop.
-  d.clear();
+  d.reset();
   if (_socket->bytesAvailable() <= 0) {
     bool ret(_socket->waitForReadyRead(0));
     while (_socket->bytesAvailable() <= 0) {
@@ -145,7 +146,7 @@ bool stream::read(
     throw (exceptions::msg()
            << "error while reading from TCP peer '"
            << _name << "': " << _socket->errorString());
-  misc::shared_ptr<io::raw> data(new io::raw);
+  std::shared_ptr<io::raw> data(new io::raw);
 #if QT_VERSION >= 0x040500
   data->append(buffer, rb);
 #else
@@ -198,7 +199,7 @@ void stream::set_write_timeout(int secs) {
  *
  *  @return Number of events acknowledged.
  */
-int stream::write(misc::shared_ptr<io::data> const& d) {
+int stream::write(std::shared_ptr<io::data> const& d) {
   // Check that socket exist.
   if (!_socket.get())
     _initialize_socket();
@@ -208,7 +209,7 @@ int stream::write(misc::shared_ptr<io::data> const& d) {
     return (1);
 
   if (d->type() == io::raw::static_type()) {
-    misc::shared_ptr<io::raw> r(d.staticCast<io::raw>());
+    std::shared_ptr<io::raw> r(std::static_pointer_cast<io::raw>(d));
     logging::debug(logging::low) << "TCP: write request of "
       << r->size() << " bytes to peer '" << _name << "'";
     qint64 wb(_socket->write(static_cast<char*>(r->QByteArray::data()),
